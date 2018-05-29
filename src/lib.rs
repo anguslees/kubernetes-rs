@@ -43,19 +43,6 @@ pub trait List<T> {
     fn into_items(self) -> Vec<T>;
 }
 
-/*
-impl<T> IntoIterator for List<T>
-    where List<T>: Sized, T: Sized
-{
-    type Item = T;
-    type IntoIter = vec::IntoIter<T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.into_items().into_iter()
-    }
-}
- */
-
 impl<'a, T> IntoIterator for &'a List<T> {
     type Item = &'a T;
     type IntoIter = slice::Iter<'a, T>;

@@ -1,7 +1,7 @@
 use std::default::Default;
 use std::borrow::Cow;
 use api::meta::v1::{ObjectMeta,LabelSelector,ItemList};
-use api::{Integer,Time,Quantity,IntOrString};
+use api::{Integer,Time,Quantity,IntOrString,TypeMeta,TypeMetaStruct};
 use {GroupVersion,Metadata};
 use serde_json::{self,Map,Value};
 
@@ -11,6 +11,8 @@ pub const GROUP_VERSION: GroupVersion = GroupVersion{group: "", version: "v1"};
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all="camelCase")]
 pub struct Pod {
+    #[serde(flatten)]
+    typemeta: TypeMetaStruct<Pod>,
     #[serde(default)]
     pub metadata: ObjectMeta,
     #[serde(default)]
@@ -21,9 +23,14 @@ pub struct Pod {
 
 pub type PodList = ItemList<Pod>;
 
+impl TypeMeta for Pod {
+    fn api_version() -> &'static str {API_GROUP}
+    fn kind() -> &'static str {"Pod"}
+}
+
 impl Metadata for Pod {
-    fn api_version(&self) -> &str { API_GROUP }
-    fn kind(&self) -> &str { "Pod" }
+    fn api_version(&self) -> &str { <Pod as TypeMeta>::api_version() }
+    fn kind(&self) -> &str { <Pod as TypeMeta>::kind() }
     fn metadata(&self) -> Cow<ObjectMeta> { Cow::Borrowed(&self.metadata) }
 }
 
@@ -895,6 +902,8 @@ fn deser_pod() {
 
     // roundtrip
     let rt_json = ::serde_json::to_value(&pod).unwrap();
+    assert_eq!(rt_json["apiVersion"], "v1");
+    assert_eq!(rt_json["kind"], "Pod");
     let pod2: Pod = ::serde_json::from_value(rt_json).unwrap();
     assert_eq!(pod, pod2);
 }

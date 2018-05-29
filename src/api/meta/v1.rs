@@ -1,10 +1,11 @@
 use std::borrow::Cow;
+use std::sync::Once;
 use std::collections::HashMap;
 use std::fmt;
 use std::error::Error as StdError;
 use serde_json::{Map,Value};
-use super::super::{Integer,Time};
-use super::super::super::{List,Metadata};
+use api::{Integer,Time,TypeMeta,TypeMetaStruct};
+use {List,Metadata};
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all="camelCase")]
@@ -269,14 +270,38 @@ pub enum EventType {
 /// Not part of the standard k8s API
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all="camelCase")]
-pub struct ItemList<T> {
+pub struct ItemList<T>
+    where T: TypeMeta
+{
+    #[serde(flatten)]
+    typemeta: TypeMetaStruct<ItemList<T>>,
     pub metadata: ListMeta,
     #[serde(default)]
     pub items: Vec<T>,
 }
 
+impl<T> TypeMeta for ItemList<T>
+where T: TypeMeta
+{
+    fn api_version() -> &'static str {T::api_version()}
+    fn kind() -> &'static str {
+        // Rust can't concatenate two string constants into another
+        // constant (yet).  TODO: Re-evaluate once constant functions
+        // are a thing.
+        static mut KIND: Option<String> = None;
+        static INIT: Once = ::std::sync::ONCE_INIT;
+        let k: &Option<String> = unsafe {
+            INIT.call_once(|| {
+                KIND = Some(format!("{}List", T::kind()));
+            });
+            &KIND
+        };
+        k.as_ref().unwrap()
+    }
+}
+
 impl<T> List<T> for ItemList<T>
-    where T: Metadata
+    where T: Metadata + TypeMeta
 {
     fn listmeta(&self) -> Cow<ListMeta> {
         Cow::Borrowed(&self.metadata)
