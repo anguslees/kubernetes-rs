@@ -1,7 +1,5 @@
 # A Kubernetes API client library for Rust
 
-[![Latest Version]][crates.io]
-
 [crates.io]: https://crates.io/crates/kubernetes
 
 ## Status
