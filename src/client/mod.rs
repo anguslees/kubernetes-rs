@@ -151,14 +151,13 @@ fn hyper_uri(u: Url) -> hyper::Uri {
 }
 
 impl<C: hyper::client::Connect + Clone> Client<C> {
-    fn req_build<O>(
+    fn url<O>(
         &self,
-        method: Method,
         gvr: &GroupVersionResource,
         namespace: Option<&str>,
         name: Option<&str>,
         opts: O,
-    ) -> Result<hyper::Request, Error>
+    ) -> Result<Url, Error>
         where O: Serialize + Default + PartialEq + fmt::Debug
     {
         let mut url: Url = self.config.cluster.server.parse()?;
@@ -189,7 +188,20 @@ impl<C: hyper::client::Connect + Clone> Client<C> {
             Some(urlopts)
         };
         url.set_query(params.as_ref().map(|v| v.as_str()));
+        Ok(url)
+    }
 
+    fn req_build<O>(
+        &self,
+        method: Method,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        name: Option<&str>,
+        opts: O,
+    ) -> Result<hyper::Request, Error>
+        where O: Serialize + Default + PartialEq + fmt::Debug
+    {
+        let url = self.url(gvr, namespace, name, opts)?;
         let req = hyper::Request::new(method, hyper_uri(url));
         Ok(req)
     }
@@ -246,8 +258,8 @@ impl<C: hyper::client::Connect + Clone> Client<C> {
     pub fn iter<L,T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> Box<Stream<Item=T, Error=Error>>
         where L: List<T> + DeserializeOwned + 'static, T: 'static
     {
-        let url = match self.req_build(Method::Get, gvr, namespace, None, opts.clone()) {
-            Ok(v) => Url::parse(&v.uri().to_string()).unwrap(),
+        let url = match self.url(gvr, namespace, None, opts.clone()) {
+            Ok(u) => Url::parse(&u.to_string()).unwrap(),
             Err(e) => return Box::new(future::err(e).into_stream()),
         };
         let client_copy = self.clone();
