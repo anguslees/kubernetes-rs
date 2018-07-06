@@ -165,29 +165,26 @@ impl<C: hyper::client::Connect + Clone> Client<C> {
         {
             let mut path = url.path_segments_mut()
                 .map_err(|_| format_err!("URL scheme does not support paths"))?;
+            /* XXX: This looks like a k8s API rooted at (say) /kube on a
+             *      reverse proxy will break.
+             */
             path.clear();
+            /* This knowledge should perhaps be pushed into the group itself */
             path.push(if gvr.group == "" && gvr.version == "v1" { "api" } else { "apis" });
             if gvr.group != "" {
                 path.push(&gvr.group);
             }
             path.push(&gvr.version);
-            if let Some(ns) = namespace {
-                path.extend(&["namespaces", ns]);
-            }
+            namespace.map(|ns| path.extend(&["namespaces", ns]));
             path.push(&gvr.resource);
-            if let Some(n) = name {
-                path.push(n);
-            }
+            name.map(|n| { path.push(n) });
         }
 
-        let params = if is_default(&opts) {
-            None
-        } else {
-            let urlopts = serde_urlencoded::to_string(&opts)
+        if !is_default(&opts) {
+            serde_urlencoded::to_string(&opts)
+                .map(|query| url.set_query(Some(&query)))
                 .context(format!("while encoding URL parameters {:?}", opts))?;
-            Some(urlopts)
-        };
-        url.set_query(params.as_ref().map(|v| v.as_str()));
+        }
         Ok(url)
     }
 
@@ -263,30 +260,29 @@ impl<C: hyper::client::Connect + Clone> Client<C> {
             Err(e) => return Box::new(future::err(e).into_stream()),
         };
         let client_copy = self.clone();
-        let res = stream::unfold((url, opts, true), move |(mut url, mut opts, more)| {
-            if more {
+        let res = stream::unfold(Some((url, opts)), move |context| {
+            context.and_then(|(mut url, mut opts)| {
                 let req = hyper::Request::new(Method::Get, hyper_uri(url.clone()));
                 let res = client_copy.request(req)
                     .and_then(move |list: L| {
-                        let (opts, more) = {
+                        let next = {
                             let meta = list.listmeta();
                             debug!("listmeta: {:#?}", meta);
-                            let more = meta.continu.is_some();
-                            opts.continu = meta.continu.as_ref()
-                                .map(|s| s.clone())
-                                .unwrap_or_default();
-                            let query = serde_urlencoded::to_string(&opts)?;
-                            url.set_query(Some(&query));
-                            (opts, more)
+                            match meta.continu {
+                                Some(ref continu) => {
+                                    opts.continu = continu.clone();
+                                    let query = serde_urlencoded::to_string(&opts)?;
+                                    url.set_query(Some(&query));
+                                    Some((url, opts))
+                                    }
+                                None => None
+                            }
                         };
-                        Ok((list, (url, opts, more)))
+                        Ok((list, next))
                     });
                 Some(res)
-            } else {
-                None
-            }
-        })
-            .map(|list| stream::iter_ok(list.into_items().into_iter()))
+            })
+        }).map(|list| stream::iter_ok(list.into_items().into_iter()))
             .flatten();
         Box::new(res)
     }
