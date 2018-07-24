@@ -175,7 +175,9 @@ pub struct OwnerReference {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all="camelCase")]
 pub struct LabelSelector {
-    pub match_expressions: LabelSelectorRequirement,
+    #[serde(default)]
+    pub match_expressions: Vec<LabelSelectorRequirement>,
+    #[serde(default)]
     pub match_labels: Map<String, Value>,
 }
 
