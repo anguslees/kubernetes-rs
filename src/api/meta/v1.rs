@@ -288,8 +288,9 @@ where T: TypeMeta
     fn api_version() -> &'static str {T::api_version()}
     fn kind() -> &'static str {
         // Rust can't concatenate two string constants into another
-        // constant (yet).  TODO: Re-evaluate once constant functions
-        // are a thing.
+        // constant at compile time (yet), so build a static string on
+        // first call at runtime.  TODO: Re-evaluate once constant
+        // functions are a thing.
         static mut KIND: Option<String> = None;
         static INIT: Once = ::std::sync::ONCE_INIT;
         let k: &Option<String> = unsafe {
