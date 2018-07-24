@@ -1,9 +1,8 @@
 use futures::{future, stream, Future, Stream};
-use tokio_core::reactor::Handle;
 use hyper_tls::HttpsConnector;
-use native_tls::{TlsConnector,Pkcs12,Certificate};
-use hyper::{self,Method};
-use hyper::header::{ContentType,ContentLength};
+use native_tls::{TlsConnector,Identity,Certificate};
+use hyper::{self,Method,Body,Request};
+use hyper::header::{CONTENT_TYPE,HeaderValue};
 use serde_json;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -13,6 +12,7 @@ use std::default::Default;
 use std::fmt;
 use std::env;
 use std::path::PathBuf;
+use std::sync::Arc;
 use failure::{Error,ResultExt};
 use openssl;
 
@@ -44,38 +44,33 @@ pub fn required_attr(attr: &'static str) -> RequiredAttributeError {
     RequiredAttributeError{attr: attr}
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Client<C> {
-    pub client: hyper::Client<C>,
+    client: Arc<hyper::Client<C>>,
     config: ConfigContext,
 }
 
-impl<C: Clone> Clone for Client<C> {
-    fn clone(&self) -> Client<C> {
-        Client {
-            client: self.client.clone(),
-            config: self.config.clone(),
-        }
-    }
-}
-
 impl Client<HttpsConnector<hyper::client::HttpConnector>> {
-    pub fn new(threads: usize, handle: &Handle) -> Result<Self, Error> {
+    pub fn new() -> Result<Self, Error> {
+        let dns_threads = 1; // Only need a single DNS lookup
+        let http = hyper::client::HttpConnector::new(dns_threads);
+        Client::new_from_http(http)
+    }
+
+    pub fn new_from_http(http: hyper::client::HttpConnector) -> Result<Self, Error> {
         let config_path = env::var_os(config::CONFIG_ENV).map(PathBuf::from)
             .or_else(config::default_path)
             .ok_or(format_err!("Unable to find config"))?;
         debug!("Reading config from {}", config_path.display());
         let config = config::load_from_file(&config_path)
-            .context(format!("unable to read {}", config_path.display()))?;
+            .with_context(|e| format!("Unable to read {}: {}", config_path.display(), e))?;
         let context = config.config_context(&config.current_context)?;
-        let client = Client::new_from_context(threads, handle, context)?;
-        Ok(client)
+        Client::new_from_context(http, context)
     }
 
-    pub fn new_from_context(threads: usize, handle: &Handle, config: ConfigContext) -> Result<Self, Error> {
-        let mut http = hyper::client::HttpConnector::new(threads, handle);
+    pub fn new_from_context(mut http: hyper::client::HttpConnector, config: ConfigContext) -> Result<Self, Error> {
         http.enforce_http(false);
-        let mut tls = TlsConnector::builder()?;
+        let mut tls = TlsConnector::builder();
         if let (Some(certdata), Some(keydata)) = (
             config.user.client_certificate_read(), config.user.client_key_read()) {
             debug!("Setting user client cert");
@@ -85,21 +80,20 @@ impl Client<HttpsConnector<hyper::client::HttpConnector>> {
             let password = "";
             let p12 = openssl::pkcs12::Pkcs12::builder()
                 .build(password, "kubeconfig", &pkey, &cert)?;
-            tls.identity(Pkcs12::from_der(&p12.to_der()?, password)?)?;
+            tls.identity(Identity::from_pkcs12(&p12.to_der()?, password)?);
         }
 
         if let Some(data) = config.cluster.certificate_authority_read() {
             debug!("Setting cluster CA cert");
             let cert = Certificate::from_pem(&data?)?;
             // FIXME: want to validate against _only_ this cert ..
-            tls.add_root_certificate(cert)?;
+            tls.add_root_certificate(cert);
         }
 
         // FIXME: config.cluster.insecure_skip_tls_verify
 
-        let hyper_client = hyper::Client::configure()
-            .connector(HttpsConnector::from((http, tls.build()?)))
-            .build(handle);
+        let hyper_client = hyper::Client::builder()
+            .build(HttpsConnector::from((http, tls.build()?)));
 
         Self::new_with_client(hyper_client, config)
     }
@@ -107,7 +101,11 @@ impl Client<HttpsConnector<hyper::client::HttpConnector>> {
 
 impl<C> Client<C> {
     pub fn new_with_client(client: hyper::Client<C>, config: ConfigContext) -> Result<Self, Error> {
-        Ok(Client{client: client, config: config})
+        Ok(Client{client: Arc::new(client), config: config})
+    }
+
+    pub fn client(&self) -> &hyper::Client<C> {
+        &self.client
     }
 }
 
@@ -150,7 +148,88 @@ fn hyper_uri(u: Url) -> hyper::Uri {
         .expect("attempted to convert invalid uri")
 }
 
-impl<C: hyper::client::Connect + Clone> Client<C> {
+fn do_request<C,T>(client: Arc<hyper::Client<C>>, req: Result<Request<hyper::Body>, Error>) -> Box<Future<Item=T, Error=Error> + Send>
+where C: hyper::client::connect::Connect + 'static,
+      T: DeserializeOwned + Send + 'static
+{
+    let f = future::result(req)
+        .inspect(|req|
+                 // Avoid body, since it may not be Debug
+                 debug!("Request: {} {}", req.method(), req.uri()))
+        .and_then(move |req|
+                  // TODO: add method/uri context to error
+                  client.request(req).from_err::<Error>())
+        .inspect(|res| debug!("Response: {} {:?}", res.status(), res.headers()))
+        // Verbose!
+        //.inspect(|res| debug!("Response: {:#?}", res))
+        .and_then(|res| {
+            let status = res.status();
+            res.into_body().concat2().map(move |body| (status, body)).from_err()
+        })
+        // Verbose!
+        //.inspect(|(_, body)| debug!("Response body: {:?}", ::std::str::from_utf8(body.as_ref())))
+        .and_then(move |(httpstatus, body)| -> Result<T, Error> {
+            if !httpstatus.is_success() {
+                debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
+                let status: Status = serde_json::from_slice(body.as_ref())
+                    .map_err(|e| {
+                        debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
+                        HttpStatusError{status: httpstatus}
+                    })?;
+                Err(status.into())
+            } else {
+                let o = serde_json::from_slice(body.as_ref())
+                    .with_context(|e| format!("Unable to parse response body: {}", e))?;
+                Ok(o)
+            }
+        });
+    Box::new(f)
+}
+
+fn do_watch<C,T>(client: &Arc<hyper::Client<C>>, req: Result<hyper::Request<hyper::Body>, Error>) -> Box<Stream<Item=T, Error=Error> + Send>
+where C: hyper::client::connect::Connect + 'static,
+      T: DeserializeOwned + Send + 'static
+{
+    let client = Arc::clone(client);
+    let f = future::result(req)
+        .inspect(|req| debug!("Watch request: {} {}", req.method(), req.uri()))
+        .and_then(move |req|
+                  // TODO: add method/uri context to error
+                  client.request(req).from_err::<Error>())
+        .inspect(|res| debug!("Response: {:#?}", res))
+        .and_then(|res| -> Box<Future<Item=_, Error=Error> + Send> {
+            let httpstatus = res.status();
+            if !httpstatus.is_success() {
+                let err = res.into_body()
+                    .concat2().from_err::<Error>()
+                    .and_then(move |body| {
+                        debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
+                        let status: Status = serde_json::from_slice(body.as_ref())
+                            .map_err(|e| {
+                                debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
+                                HttpStatusError{status: httpstatus}
+                            })?;
+
+                        Err(status.into())
+                    });
+                Box::new(err)
+            } else {
+                let stream = resplit::new(res.into_body(), |&c| c == b'\n').from_err()
+                    .inspect(|line| debug!("Got line: {:#?}", ::std::str::from_utf8(line).unwrap_or("<invalid utf8>")))
+                    .and_then(move |line| {
+                        let o: T = serde_json::from_slice(line.as_ref())
+                            .with_context(|e| format!("Unable to parse watch line : {}", e))?;
+                        Ok(o)
+                    });
+                Box::new(future::ok(stream))
+            }
+        })
+        .flatten_stream();
+    Box::new(f)
+}
+
+
+impl<C: hyper::client::connect::Connect + 'static> Client<C> {
     fn url<O>(
         &self,
         gvr: &GroupVersionResource,
@@ -183,219 +262,159 @@ impl<C: hyper::client::Connect + Clone> Client<C> {
         if !is_default(&opts) {
             serde_urlencoded::to_string(&opts)
                 .map(|query| url.set_query(Some(&query)))
-                .context(format!("while encoding URL parameters {:?}", opts))?;
+                .with_context(|e| format!("Unable to encode URL parameters {}", e))?;
         }
         Ok(url)
     }
 
-    fn req_build<O>(
-        &self,
-        method: Method,
-        gvr: &GroupVersionResource,
-        namespace: Option<&str>,
-        name: Option<&str>,
-        opts: O,
-    ) -> Result<hyper::Request, Error>
-        where O: Serialize + Default + PartialEq + fmt::Debug
+    pub fn get<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, opts: GetOptions) -> Box<Future<Item=T, Error=Error> + Send>
+        where T: DeserializeOwned + Send + 'static
     {
-        let url = self.url(gvr, namespace, name, opts)?;
-        let req = hyper::Request::new(method, hyper_uri(url));
-        Ok(req)
+        let req = self.url(gvr, namespace, Some(name), opts)
+            .and_then(|url| {
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(hyper_uri(url))
+                    .body(Body::empty())
+                    .map_err(|e| e.into())
+            });
+        do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn get<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, opts: GetOptions) -> Box<Future<Item=T, Error=Error>>
-        where T: DeserializeOwned + 'static
+    pub fn put<T>(&self, gvr: &GroupVersionResource, value: &T, opts: GetOptions) -> Box<Future<Item=T, Error=Error> + Send>
+        where T: Metadata + Serialize + DeserializeOwned + Send + 'static
     {
-        match self.req_build(Method::Get, gvr, namespace, Some(name), opts) {
-            Ok(req) => self.request(req),
-            Err(e) => Box::new(future::err(e)),
-        }
-    }
-
-    pub fn put<T>(&self, gvr: &GroupVersionResource, value: &T, opts: GetOptions) -> Box<Future<Item=T, Error=Error>>
-        where T: Metadata + Serialize + DeserializeOwned + 'static
-    {
-        let req = || {
+        let req = || -> Result<_, Error> {
             let metadata = value.metadata();
             let namespace = &metadata.namespace; // NB: assumes input object is correctly qualified
             let name = metadata.name.as_ref().ok_or(required_attr("name"))?;
-            self.req_build(Method::Post, gvr, namespace.as_ref().map(|v| v.as_str()), Some(&name), opts)
-                .and_then(|mut req| {
-                    let json = serde_json::to_vec(value)?;
-                    req.headers_mut().set(ContentType::json());
-                    req.headers_mut().set(ContentLength(json.len() as u64));
-                    req.set_body(json);
-                    Ok(req)
-                })
-        };
-        match req() {
-            Ok(req) => self.request(req),
-            Err(e) => Box::new(future::err(e)),
-        }
+
+            let json = serde_json::to_vec(value)?;
+
+            Request::builder()
+                .method(Method::POST)
+                .uri(hyper_uri(self.url(gvr, namespace.as_ref().map(|v| v.as_str()), Some(&name), opts)?))
+                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                .body(Body::from(json))
+                .map_err(|e| e.into())
+        }();
+        do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn watch(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, mut opts: ListOptions) -> Box<Stream<Item=WatchEvent, Error=Error>>
+    pub fn watch(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, mut opts: ListOptions) -> Box<Stream<Item=WatchEvent, Error=Error> + Send>
     {
         opts.watch = true;
-        match self.req_build(Method::Get, gvr, namespace, Some(name), opts) {
-            Ok(req) => self.watch_request(req),
-            Err(e) => Box::new(future::err(e).into_stream()),
-        }
-    }
-
-    pub fn list<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> Box<Future<Item=T, Error=Error>>
-        where T: DeserializeOwned + 'static
-    {
-        match self.req_build(Method::Get, gvr, namespace, None, opts) {
-            Ok(req) => self.request(req),
-            Err(e) => Box::new(future::err(e)),
-        }
-    }
-
-    pub fn iter<L,T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> Box<Stream<Item=T, Error=Error>>
-        where L: List<T> + DeserializeOwned + 'static, T: 'static
-    {
-        let url = match self.url(gvr, namespace, None, opts.clone()) {
-            Ok(u) => Url::parse(&u.to_string()).unwrap(),
-            Err(e) => return Box::new(future::err(e).into_stream()),
-        };
-        let client_copy = self.clone();
-        let res = stream::unfold(Some((url, opts)), move |context| {
-            context.and_then(|(mut url, mut opts)| {
-                let req = hyper::Request::new(Method::Get, hyper_uri(url.clone()));
-                let res = client_copy.request(req)
-                    .and_then(move |list: L| {
-                        let next = {
-                            let meta = list.listmeta();
-                            debug!("listmeta: {:#?}", meta);
-                            match meta.continu {
-                                Some(ref continu) => {
-                                    opts.continu = continu.clone();
-                                    let query = serde_urlencoded::to_string(&opts)?;
-                                    url.set_query(Some(&query));
-                                    Some((url, opts))
-                                    }
-                                None => None
-                            }
-                        };
-                        Ok((list, next))
-                    });
-                Some(res)
-            })
-        }).map(|list| stream::iter_ok(list.into_items().into_iter()))
-            .flatten();
-        Box::new(res)
-    }
-
-    pub fn watch_list(&self, gvr: &GroupVersionResource, namespace: Option<&str>, mut opts: ListOptions) -> Box<Stream<Item=WatchEvent, Error=Error>>
-    {
-        opts.watch = true;
-        match self.req_build(Method::Get, gvr, namespace, None, opts) {
-            Ok(req) => self.watch_request(req),
-            Err(e) => Box::new(future::err(e).into_stream()),
-        }
-    }
-
-    pub fn request<T>(&self, req: hyper::Request) -> Box<Future<Item=T, Error=Error>>
-        where T: DeserializeOwned + 'static
-    {
-        debug!("Request: {:#?}", req);
-        let f = self.client.request(req).from_err::<Error>()
-            // TODO: add method/uri context to error
-            .inspect(|res| debug!("Response: {:#?}", res))
-            .and_then(|res| {
-                let status = res.status();
-                res.body().concat2().map(move |body| (status, body)).from_err()
-            })
-            .and_then(move |(httpstatus, body)| -> Result<T, Error> {
-                if !httpstatus.is_success() {
-                    debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
-                    let status: Status = serde_json::from_slice(body.as_ref())
-                        .map_err(|e| {
-                            debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
-                            HttpStatusError{status: httpstatus}
-                        })?;
-                    Err(status.into())
-                } else {
-                    let o = serde_json::from_slice(body.as_ref())
-                        .context(format!("while parsing response body: {}", String::from_utf8_lossy(body.as_ref())))?;
-                    Ok(o)
-                }
+        let req = self.url(gvr, namespace, Some(name), opts)
+            .and_then(|url| {
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(hyper_uri(url))
+                    .body(Body::empty())
+                    .map_err(|e| e.into())
             });
-        Box::new(f)
+        do_watch(&self.client, req)
     }
 
-    pub fn watch_request<T>(&self, req: hyper::Request) -> Box<Stream<Item=T, Error=Error>>
-        where T: DeserializeOwned + 'static
+    pub fn watch_list(&self, gvr: &GroupVersionResource, namespace: Option<&str>, mut opts: ListOptions) -> Box<Stream<Item=WatchEvent, Error=Error> + Send>
     {
-        debug!("Request: {:#?}", req);
-        let f = self.client.request(req).from_err::<Error>()
-            // TODO: add method/uri context to error
-            .inspect(|res| debug!("Response: {:#?}", res))
-            .and_then(|res| -> Box<Future<Item=_, Error=Error>> {
-                let httpstatus = res.status();
-                if !httpstatus.is_success() {
-                    let err = res.body()
-                        .concat2().from_err::<Error>()
-                        .and_then(move |body| {
-                            debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
-                            let status: Status = serde_json::from_slice(body.as_ref())
-                                .map_err(|e| {
-                                    debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
-                                    HttpStatusError{status: httpstatus}
-                                })?;
+        opts.watch = true;
+        let req = self.url(gvr, namespace, None, opts)
+            .and_then(|url| {
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(hyper_uri(url))
+                    .body(Body::empty())
+                    .map_err(|e| e.into())
+            });
+        do_watch(&self.client, req)
+    }
 
-                            Err(status.into())
+    pub fn list<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> Box<Future<Item=T, Error=Error> + Send>
+        where T: DeserializeOwned + Send + 'static
+    {
+        let req = self.url(gvr, namespace, None, opts)
+            .and_then(|url| {
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(hyper_uri(url))
+                    .body(Body::empty())
+                    .map_err(|e| e.into())
+            });
+        do_request(Arc::clone(&self.client), req)
+    }
+
+    pub fn iter<L,T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> Box<Stream<Item=T, Error=Error> + Send>
+        where L: List<T> + DeserializeOwned + Send + 'static, T: Send + 'static
+    {
+        let url = self.url(gvr, namespace, None, opts.clone());
+
+        let client = Arc::clone(&self.client);
+        let fetch_pages = move |url: Url| {
+            stream::unfold(Some((url, opts)), move |context| {
+                context.and_then(|(mut url, mut opts)| {
+                    let req = Request::builder()
+                        .method(Method::GET)
+                        .uri(hyper_uri(url.clone()))
+                        .body(Body::empty())
+                        .map_err(|e| e.into());
+                    let res = do_request(Arc::clone(&client), req)
+                        .and_then(move |list: L| {
+                            let next = {
+                                let meta = list.listmeta();
+                                match meta.continu {
+                                    Some(ref continu) => {
+                                        opts.continu = continu.clone();
+                                        let query = serde_urlencoded::to_string(&opts)?;
+                                        url.set_query(Some(&query));
+                                        Some((url, opts))
+                                    },
+                                    None => None,
+                                }
+                            };
+                            Ok((list, next))
                         });
-                    Box::new(err)
-                } else {
-                    let stream = resplit::new(res.body(), |&c| c == b'\n').from_err()
-                        .inspect(|line| debug!("Got line: {:#?}", ::std::str::from_utf8(line).unwrap_or("<invalid utf8>")))
-                        .and_then(move |line| {
-                            let o: T = serde_json::from_slice(line.as_ref())
-                                .context(format!("while parsing watch line : {}", String::from_utf8_lossy(line.as_ref())))?;
-                            Ok(o)
-                        });
-                    Box::new(future::ok(stream))
-                }
+                    Some(res)
+                })
             })
-            .flatten_stream();
-        Box::new(f)
+        };
+
+        let s = future::result(url)
+            .and_then(move |url| future::ok(fetch_pages(url)))
+            .flatten_stream()
+            .map(|page| stream::iter_ok(page.into_items().into_iter()))
+            .flatten();
+        Box::new(s)
     }
 }
 
 #[test]
-fn test_req_build() {
-    use tokio_core::reactor::Core;
-    let core = Core::new().unwrap();
+fn test_url() {
     let mut context: ConfigContext = Default::default();
     context.cluster.server = "https://192.168.42.147:8443".into();
-    let client = Client::new_from_context(1, &core.handle(), context).unwrap();
+    let http = hyper::client::HttpConnector::new(1);
+    let client = Client::new_from_context(http, context).unwrap();
 
-    let req = client.req_build(
-        Method::Get,
+    let url = client.url(
         &GroupVersionResource{group: "", version: "v1", resource: "pods"},
         Some("myns"),
         Some("myname"),
         GetOptions::default(),
     ).unwrap();
-    assert_eq!(*req.uri(), "https://192.168.42.147:8443/api/v1/namespaces/myns/pods/myname");
+    assert_eq!(url.to_string(), "https://192.168.42.147:8443/api/v1/namespaces/myns/pods/myname");
 
-    let req = client.req_build(
-        Method::Post,
+    let url = client.url(
         &GroupVersionResource{group: "rbac.authorization.k8s.io", version: "v1beta1", resource: "clusterroles"},
         None,
         Some("myrole"),
         GetOptions{pretty: true, ..Default::default()},
     ).unwrap();
-    assert_eq!(*req.uri(), "https://192.168.42.147:8443/apis/rbac.authorization.k8s.io/v1beta1/clusterroles/myrole?pretty=true");
+    assert_eq!(url.to_string(), "https://192.168.42.147:8443/apis/rbac.authorization.k8s.io/v1beta1/clusterroles/myrole?pretty=true");
 
-    let req = client.req_build(
-        Method::Get,
+    let url = client.url(
         &GroupVersionResource{group: "", version: "v1", resource: "namespaces"},
         None,
         None,
         ListOptions{resource_version: "abcdef".into(), limit: 27, ..Default::default()},
     ).unwrap();
-    assert_eq!(*req.uri(), "https://192.168.42.147:8443/api/v1/namespaces?resourceVersion=abcdef&limit=27");
+    assert_eq!(url.to_string(), "https://192.168.42.147:8443/api/v1/namespaces?resourceVersion=abcdef&limit=27");
 }

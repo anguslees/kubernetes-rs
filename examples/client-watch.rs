@@ -1,7 +1,6 @@
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
-extern crate tokio_core;
 extern crate serde_json;
 extern crate failure;
 extern crate kubernetes;
@@ -11,7 +10,7 @@ extern crate pretty_env_logger;
 use std::result::Result;
 use failure::Error;
 use futures::prelude::*;
-use tokio_core::reactor::Core;
+use hyper::rt;
 
 use kubernetes::api;
 use kubernetes::client::{Client,ListOptions};
@@ -57,8 +56,7 @@ fn print_pod_state(p: &Pod) {
 }
 
 fn main_() -> Result<(),Error> {
-    let mut core = Core::new()?;
-    let client = Client::new(2, &core.handle())?;
+    let client = Client::new()?;
 
     let pods = api::core::v1::GROUP_VERSION.with_resource("pods");
     let namespace = Some("kube-system");
@@ -67,7 +65,7 @@ fn main_() -> Result<(),Error> {
         .inspect(|podlist: &PodList| {
             podlist.items.iter().for_each(print_pod_state);
         })
-        .and_then(|podlist: PodList| {
+        .and_then(move |podlist: PodList| {
             debug!("Starting at resource version {}", podlist.metadata.resource_version);
 
             let listopts = ListOptions { resource_version: podlist.metadata.resource_version, ..Default::default() };
@@ -81,7 +79,7 @@ fn main_() -> Result<(),Error> {
                         EventType::Deleted => {
                             let p: Pod = serde_json::from_value(event.object)?;
                             println!("deleted {}",
-                                     p.metadata.name.as_ref().map(String::as_str).unwrap_or("(no name)"));
+                                     p.metadata.name.unwrap_or("(no name)".into()));
                         },
                         EventType::Error => debug!("Ignoring error event {:#?}", event.object),
                     }
@@ -89,7 +87,7 @@ fn main_() -> Result<(),Error> {
                 })
         });
 
-    core.run(work)?;
+    rt::run(work.map_err(|err| panic!("Error: {}", err)));
 
     Ok(())
 }
