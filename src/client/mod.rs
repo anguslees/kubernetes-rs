@@ -148,11 +148,11 @@ fn hyper_uri(u: Url) -> hyper::Uri {
         .expect("attempted to convert invalid uri")
 }
 
-fn do_request<C,T>(client: Arc<hyper::Client<C>>, req: Result<Request<hyper::Body>, Error>) -> Box<Future<Item=T, Error=Error> + Send>
+fn do_request<C,T>(client: Arc<hyper::Client<C>>, req: Result<Request<hyper::Body>, Error>) -> impl Future<Item=T, Error=Error> + Send
 where C: hyper::client::connect::Connect + 'static,
       T: DeserializeOwned + Send + 'static
 {
-    let f = future::result(req)
+    future::result(req)
         .inspect(|req|
                  // Avoid body, since it may not be Debug
                  debug!("Request: {} {}", req.method(), req.uri()))
@@ -182,50 +182,49 @@ where C: hyper::client::connect::Connect + 'static,
                     .with_context(|e| format!("Unable to parse response body: {}", e))?;
                 Ok(o)
             }
-        });
-    Box::new(f)
+        })
 }
 
-fn do_watch<C,T>(client: &Arc<hyper::Client<C>>, req: Result<hyper::Request<hyper::Body>, Error>) -> Box<Stream<Item=T, Error=Error> + Send>
+fn do_watch<C,T>(client: &Arc<hyper::Client<C>>, req: Result<hyper::Request<hyper::Body>, Error>) -> impl Stream<Item=T, Error=Error> + Send
 where C: hyper::client::connect::Connect + 'static,
       T: DeserializeOwned + Send + 'static
 {
     let client = Arc::clone(client);
-    let f = future::result(req)
+    future::result(req)
         .inspect(|req| debug!("Watch request: {} {}", req.method(), req.uri()))
         .and_then(move |req|
                   // TODO: add method/uri context to error
                   client.request(req).from_err::<Error>())
         .inspect(|res| debug!("Response: {:#?}", res))
-        .and_then(|res| -> Box<Future<Item=_, Error=Error> + Send> {
+        .and_then(|res| {
             let httpstatus = res.status();
-            if !httpstatus.is_success() {
-                let err = res.into_body()
-                    .concat2().from_err::<Error>()
-                    .and_then(move |body| {
-                        debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
-                        let status: Status = serde_json::from_slice(body.as_ref())
-                            .map_err(|e| {
-                                debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
-                                HttpStatusError{status: httpstatus}
-                            })?;
+            let r = if httpstatus.is_success() { Ok(res) } else { Err(res) };
+            future::result(r)
+                .or_else(move |res| {
+                    res.into_body()
+                        .concat2().from_err::<Error>()
+                        .and_then(move |body| {
+                            debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
+                            let status: Status = serde_json::from_slice(body.as_ref())
+                                .map_err(|e| {
+                                    debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
+                                    HttpStatusError{status: httpstatus}
+                                })?;
 
-                        Err(status.into())
-                    });
-                Box::new(err)
-            } else {
-                let stream = resplit::new(res.into_body(), |&c| c == b'\n').from_err()
-                    .inspect(|line| debug!("Got line: {:#?}", ::std::str::from_utf8(line).unwrap_or("<invalid utf8>")))
-                    .and_then(move |line| {
-                        let o: T = serde_json::from_slice(line.as_ref())
-                            .with_context(|e| format!("Unable to parse watch line : {}", e))?;
-                        Ok(o)
-                    });
-                Box::new(future::ok(stream))
-            }
+                            Err(status.into())
+                        })
+                })
+                .map(|res| {
+                    resplit::new(res.into_body(), |&c| c == b'\n').from_err()
+                        .inspect(|line| debug!("Got line: {:#?}", ::std::str::from_utf8(line).unwrap_or("<invalid utf8>")))
+                        .and_then(move |line| {
+                            let o: T = serde_json::from_slice(line.as_ref())
+                                .with_context(|e| format!("Unable to parse watch line : {}", e))?;
+                            Ok(o)
+                        })
+                })
         })
-        .flatten_stream();
-    Box::new(f)
+        .flatten_stream()
 }
 
 
@@ -267,7 +266,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         Ok(url)
     }
 
-    pub fn get<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, opts: GetOptions) -> Box<Future<Item=T, Error=Error> + Send>
+    pub fn get<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, opts: GetOptions) -> impl Future<Item=T, Error=Error> + Send
         where T: DeserializeOwned + Send + 'static
     {
         let req = self.url(gvr, namespace, Some(name), opts)
@@ -281,7 +280,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn put<T>(&self, gvr: &GroupVersionResource, value: &T, opts: GetOptions) -> Box<Future<Item=T, Error=Error> + Send>
+    pub fn put<T>(&self, gvr: &GroupVersionResource, value: &T, opts: GetOptions) -> impl Future<Item=T, Error=Error> + Send
         where T: Metadata + Serialize + DeserializeOwned + Send + 'static
     {
         let req = || -> Result<_, Error> {
@@ -301,7 +300,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn watch(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, mut opts: ListOptions) -> Box<Stream<Item=WatchEvent, Error=Error> + Send>
+    pub fn watch(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, mut opts: ListOptions) -> impl Stream<Item=WatchEvent, Error=Error> + Send
     {
         opts.watch = true;
         let req = self.url(gvr, namespace, Some(name), opts)
@@ -315,7 +314,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_watch(&self.client, req)
     }
 
-    pub fn watch_list(&self, gvr: &GroupVersionResource, namespace: Option<&str>, mut opts: ListOptions) -> Box<Stream<Item=WatchEvent, Error=Error> + Send>
+    pub fn watch_list(&self, gvr: &GroupVersionResource, namespace: Option<&str>, mut opts: ListOptions) -> impl Stream<Item=WatchEvent, Error=Error> + Send
     {
         opts.watch = true;
         let req = self.url(gvr, namespace, None, opts)
@@ -329,7 +328,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_watch(&self.client, req)
     }
 
-    pub fn list<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> Box<Future<Item=T, Error=Error> + Send>
+    pub fn list<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> impl Future<Item=T, Error=Error> + Send
         where T: DeserializeOwned + Send + 'static
     {
         let req = self.url(gvr, namespace, None, opts)
@@ -343,7 +342,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn iter<L,T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> Box<Stream<Item=T, Error=Error> + Send>
+    pub fn iter<L,T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> impl Stream<Item=T, Error=Error> + Send
         where L: List<T> + DeserializeOwned + Send + 'static, T: Send + 'static
     {
         let url = self.url(gvr, namespace, None, opts.clone());
@@ -378,12 +377,11 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
             })
         };
 
-        let s = future::result(url)
+        future::result(url)
             .and_then(move |url| future::ok(fetch_pages(url)))
             .flatten_stream()
             .map(|page| stream::iter_ok(page.into_items().into_iter()))
-            .flatten();
-        Box::new(s)
+            .flatten()
     }
 }
 
