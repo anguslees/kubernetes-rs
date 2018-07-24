@@ -188,7 +188,7 @@ pub struct PodAffinityTerm {
     pub label_selector: LabelSelector,
     #[serde(default)]
     pub namespaces: Vec<String>,
-    pub topology_key: String
+    pub topology_key: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
@@ -422,7 +422,7 @@ pub struct ContainerPort {
     pub container_port: Integer,
     #[serde(rename="hostIP")]
     pub host_ip: Option<String>,
-    pub host_port: Option<String>,
+    pub host_port: Option<Integer>,
     pub name: Option<String>,
     #[serde(default="tcp")]
     pub protocol: Protocol,
