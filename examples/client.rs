@@ -14,7 +14,7 @@ use std::result::Result;
 use tokio::runtime::current_thread;
 
 use kubernetes::api;
-use kubernetes::api::core::v1::{Pod, PodList};
+use kubernetes::api::core::v1::Pod;
 use kubernetes::client::{Client, ListOptions};
 
 fn main_() -> Result<(), Error> {
@@ -30,7 +30,7 @@ fn main_() -> Result<(), Error> {
     };
 
     let names_future = client
-        .iter::<PodList, Pod>(&pods, namespace, opts)
+        .iter::<Pod>(&pods, namespace, opts)
         .map(|pod| pod.metadata.name.unwrap_or("(no name)".into()))
         .collect();
 
