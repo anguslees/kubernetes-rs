@@ -47,7 +47,7 @@ fn main() {
         Ok(_) => 0,
         Err(e) => {
             eprintln!("Error: {}", e);
-            for c in e.causes().skip(1) {
+            for c in e.iter_chain().skip(1) {
                 eprintln!(" Caused by {}", c);
             }
             eprintln!("{}", e.backtrace());
