@@ -1,6 +1,6 @@
+extern crate dirs;
 use std::path::{Path,PathBuf};
 use std::fs::File;
-use std::env::home_dir;
 use std::io::{self,Read};
 use failure::Error;
 use serde_yaml;
@@ -20,7 +20,7 @@ pub fn config_err(msg: &'static str) -> ConfigError {
 }
 
 pub fn default_path() -> Option<PathBuf> {
-    home_dir()
+    dirs::home_dir()
         .map(|h| h.join(".kube").join("config"))
 }
 
