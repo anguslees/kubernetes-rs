@@ -13,6 +13,7 @@ license = "Apache-2.0"
 maintenance = {status = "actively-developed,experimental"}
 
 [dependencies]
+dirs = "1.0"
 url = "1.6"
 hyper = "0.12"
 hyper-tls = "0.3"
