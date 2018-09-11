@@ -119,10 +119,6 @@ impl<C> Client<C> {
     }
 }
 
-fn is_default<T: Default + PartialEq>(v: &T) -> bool {
-    *v == Default::default()
-}
-
 fn hyper_uri(u: Url) -> hyper::Uri {
     u.to_string()
         .parse()
@@ -237,7 +233,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         opts: O,
     ) -> Result<Url, Error>
     where
-        O: Serialize + Default + PartialEq + fmt::Debug,
+        O: Serialize + fmt::Debug,
     {
         let mut url: Url = self.config.cluster.server.parse()?;
 
@@ -264,11 +260,16 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
             name.map(|n| path.push(n));
         }
 
-        if !is_default(&opts) {
-            serde_urlencoded::to_string(&opts)
-                .map(|query| url.set_query(Some(&query)))
-                .with_context(|e| format!("Unable to encode URL parameters {}", e))?;
-        }
+        serde_urlencoded::to_string(&opts)
+            .map(|query| {
+                let q = if query != "" {
+                    Some(query.as_str())
+                } else {
+                    None
+                };
+                url.set_query(q)
+            })
+            .with_context(|e| format!("Unable to encode URL parameters {}", e))?;
         Ok(url)
     }
 
