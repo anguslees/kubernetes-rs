@@ -15,7 +15,8 @@ use tokio::runtime::current_thread;
 
 use kubernetes::api;
 use kubernetes::api::core::v1::Pod;
-use kubernetes::client::{Client, ListOptions};
+use kubernetes::api::meta::v1::ListOptions;
+use kubernetes::client::Client;
 
 fn main_() -> Result<(), Error> {
     let client = Client::new()?;

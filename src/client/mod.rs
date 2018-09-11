@@ -20,7 +20,7 @@ pub mod config;
 mod resplit;
 
 use self::config::ConfigContext;
-use super::api::meta::v1::{ItemList, Status, WatchEvent};
+use super::api::meta::v1::{GetOptions, ItemList, ListOptions, Status, WatchEvent};
 use super::api::TypeMeta;
 use super::{GroupVersionResource, Metadata};
 
@@ -121,36 +121,6 @@ impl<C> Client<C> {
 
 fn is_default<T: Default + PartialEq>(v: &T) -> bool {
     *v == Default::default()
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct GetOptions {
-    #[serde(skip_serializing_if = "is_default")]
-    pub pretty: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct ListOptions {
-    #[serde(skip_serializing_if = "is_default")]
-    pub resource_version: String, // Vec<u8>
-    #[serde(skip_serializing_if = "is_default")]
-    pub timeout_seconds: u32,
-    #[serde(skip_serializing_if = "is_default")]
-    pub watch: bool, // NB: set explicitly by watch()
-    #[serde(skip_serializing_if = "is_default")]
-    pub pretty: bool,
-    #[serde(skip_serializing_if = "is_default")]
-    pub field_selector: String,
-    #[serde(skip_serializing_if = "is_default")]
-    pub label_selector: String,
-    #[serde(skip_serializing_if = "is_default")]
-    pub include_uninitialized: bool,
-    #[serde(skip_serializing_if = "is_default")]
-    pub limit: u32,
-    #[serde(skip_serializing_if = "is_default", rename = "continue")]
-    pub continu: String, // Vec<u8>
 }
 
 fn hyper_uri(u: Url) -> hyper::Uri {

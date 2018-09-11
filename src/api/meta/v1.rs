@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Once;
-use {List, Metadata};
+use List;
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -309,7 +309,7 @@ where
 
 impl<T> List<T> for ItemList<T>
 where
-    T: Metadata + TypeMeta,
+    T: TypeMeta,
 {
     fn listmeta(&self) -> Cow<ListMeta> {
         Cow::Borrowed(&self.metadata)
@@ -323,4 +323,68 @@ where
     fn into_items(self) -> Vec<T> {
         self.items
     }
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == Default::default()
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GetOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub pretty: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub resource_version: String,
+    #[serde(skip_serializing_if = "is_default")]
+    pub include_uninitialized: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct Preconditions {
+    #[serde(default)]
+    pub uid: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum DeletionPropagation {
+    Orphan,
+    Background,
+    Foreground,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DeleteOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub grace_period_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "is_default", default)]
+    pub preconditions: Vec<Preconditions>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub orphan_dependents: Option<bool>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub propagation_policy: Option<DeletionPropagation>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ListOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub resource_version: String, // Vec<u8>
+    #[serde(skip_serializing_if = "is_default")]
+    pub timeout_seconds: u32,
+    #[serde(skip_serializing_if = "is_default")]
+    pub watch: bool, // NB: set explicitly by watch()
+    #[serde(skip_serializing_if = "is_default")]
+    pub pretty: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub field_selector: String,
+    #[serde(skip_serializing_if = "is_default")]
+    pub label_selector: String,
+    #[serde(skip_serializing_if = "is_default")]
+    pub include_uninitialized: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub limit: u32,
+    #[serde(skip_serializing_if = "is_default", rename = "continue")]
+    pub continu: String, // Vec<u8>
 }
