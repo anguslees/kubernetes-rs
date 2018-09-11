@@ -20,7 +20,7 @@ pub mod config;
 mod resplit;
 
 use self::config::ConfigContext;
-use super::api::meta::v1::{ItemList, Status, WatchEvent};
+use super::api::meta::v1::{GetOptions, ItemList, ListOptions, Status, WatchEvent};
 use super::api::TypeMeta;
 use super::{GroupVersionResource, Metadata};
 
@@ -117,40 +117,6 @@ impl<C> Client<C> {
     pub fn client(&self) -> &hyper::Client<C> {
         &self.client
     }
-}
-
-fn is_default<T: Default + PartialEq>(v: &T) -> bool {
-    *v == Default::default()
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct GetOptions {
-    #[serde(skip_serializing_if = "is_default")]
-    pub pretty: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct ListOptions {
-    #[serde(skip_serializing_if = "is_default")]
-    pub resource_version: String, // Vec<u8>
-    #[serde(skip_serializing_if = "is_default")]
-    pub timeout_seconds: u32,
-    #[serde(skip_serializing_if = "is_default")]
-    pub watch: bool, // NB: set explicitly by watch()
-    #[serde(skip_serializing_if = "is_default")]
-    pub pretty: bool,
-    #[serde(skip_serializing_if = "is_default")]
-    pub field_selector: String,
-    #[serde(skip_serializing_if = "is_default")]
-    pub label_selector: String,
-    #[serde(skip_serializing_if = "is_default")]
-    pub include_uninitialized: bool,
-    #[serde(skip_serializing_if = "is_default")]
-    pub limit: u32,
-    #[serde(skip_serializing_if = "is_default", rename = "continue")]
-    pub continu: String, // Vec<u8>
 }
 
 fn hyper_uri(u: Url) -> hyper::Uri {
@@ -267,7 +233,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         opts: O,
     ) -> Result<Url, Error>
     where
-        O: Serialize + Default + PartialEq + fmt::Debug,
+        O: Serialize + fmt::Debug,
     {
         let mut url: Url = self.config.cluster.server.parse()?;
 
@@ -294,11 +260,16 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
             name.map(|n| path.push(n));
         }
 
-        if !is_default(&opts) {
-            serde_urlencoded::to_string(&opts)
-                .map(|query| url.set_query(Some(&query)))
-                .with_context(|e| format!("Unable to encode URL parameters {}", e))?;
-        }
+        serde_urlencoded::to_string(&opts)
+            .map(|query| {
+                let q = if query != "" {
+                    Some(query.as_str())
+                } else {
+                    None
+                };
+                url.set_query(q)
+            })
+            .with_context(|e| format!("Unable to encode URL parameters {}", e))?;
         Ok(url)
     }
 

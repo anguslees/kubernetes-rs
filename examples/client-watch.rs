@@ -15,8 +15,8 @@ use std::result::Result;
 
 use kubernetes::api;
 use kubernetes::api::core::v1::{ContainerState, Pod, PodList};
-use kubernetes::api::meta::v1::EventType;
-use kubernetes::client::{Client, ListOptions};
+use kubernetes::api::meta::v1::{EventType, ListOptions};
+use kubernetes::client::Client;
 
 fn print_pod_state(p: &Pod) {
     println!(
