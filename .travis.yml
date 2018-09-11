@@ -5,6 +5,11 @@ rust:
   - beta
   - nightly
 
+env:
+  # travis "cache: cargo" seems to ignore the Rust version, resulting
+  # in rebuilding everything every time.
+  - CACHE_KEY=$TRAVIS_RUST_VERSION
+
 matrix:
   allow_failures:
     - rust: nightly
