@@ -1,45 +1,59 @@
+extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
-extern crate serde_json;
-extern crate failure;
 extern crate kubernetes;
-#[macro_use] extern crate log;
+extern crate serde_json;
+#[macro_use]
+extern crate log;
 extern crate pretty_env_logger;
 
-use std::result::Result;
 use failure::Error;
 use futures::prelude::*;
 use hyper::rt;
+use std::result::Result;
 
 use kubernetes::api;
-use kubernetes::client::{Client,ListOptions};
-use kubernetes::api::core::v1::{Pod,PodList,ContainerState};
+use kubernetes::api::core::v1::{ContainerState, Pod, PodList};
 use kubernetes::api::meta::v1::EventType;
+use kubernetes::client::{Client, ListOptions};
 
 fn print_pod_state(p: &Pod) {
-    println!("pod {} - {:?}",
-             p.metadata.name.as_ref().map(String::as_str).unwrap_or("(no name)"),
-             p.status.phase.unwrap_or(api::core::v1::PodPhase::Unknown));
-    let c_statuses = p.status.init_container_statuses.iter()
+    println!(
+        "pod {} - {:?}",
+        p.metadata
+            .name
+            .as_ref()
+            .map(String::as_str)
+            .unwrap_or("(no name)"),
+        p.status.phase.unwrap_or(api::core::v1::PodPhase::Unknown)
+    );
+    let c_statuses = p
+        .status
+        .init_container_statuses
+        .iter()
         .chain(p.status.container_statuses.iter());
     for c in c_statuses {
         print!("  -> {}: ", c.name);
         match c.state {
             None => println!("state unknown"),
-            Some(ContainerState::Waiting(ref s)) =>
-                println!("waiting: {}",
-                         s.message.as_ref()
-                         .or(s.reason.as_ref())
-                         .map(String::as_str)
-                         .unwrap_or("waiting")),
+            Some(ContainerState::Waiting(ref s)) => {
+                println!(
+                    "waiting: {}",
+                    s.message
+                        .as_ref()
+                        .or(s.reason.as_ref())
+                        .map(String::as_str)
+                        .unwrap_or("waiting")
+                );
+            }
             Some(ContainerState::Running(ref s)) => {
                 print!("running");
                 if let Some(ref t) = s.started_at {
                     print!(" since {}", t);
                 }
                 println!("");
-            },
+            }
             Some(ContainerState::Terminated(ref s)) => {
                 if let Some(ref msg) = s.message {
                     println!("terminated: {}", msg);
@@ -50,37 +64,44 @@ fn print_pod_state(p: &Pod) {
                     }
                     println!("");
                 }
-            },
+            }
         }
     }
 }
 
-fn main_() -> Result<(),Error> {
+fn main_() -> Result<(), Error> {
     let client = Client::new()?;
 
     let pods = api::core::v1::GROUP_VERSION.with_resource("pods");
     let namespace = Some("kube-system");
 
-    let work = client.list(&pods, namespace, Default::default())
+    let work = client
+        .list(&pods, namespace, Default::default())
         .inspect(|podlist: &PodList| {
             podlist.items.iter().for_each(print_pod_state);
         })
         .and_then(move |podlist: PodList| {
-            debug!("Starting at resource version {}", podlist.metadata.resource_version);
+            debug!(
+                "Starting at resource version {}",
+                podlist.metadata.resource_version
+            );
 
-            let listopts = ListOptions { resource_version: podlist.metadata.resource_version, ..Default::default() };
-            client.watch_list(&pods, namespace, listopts)
+            let listopts = ListOptions {
+                resource_version: podlist.metadata.resource_version,
+                ..Default::default()
+            };
+            client
+                .watch_list(&pods, namespace, listopts)
                 .for_each(|event| {
                     match event.typ {
-                        EventType::Added|EventType::Modified => {
+                        EventType::Added | EventType::Modified => {
                             let p: Pod = serde_json::from_value(event.object)?;
                             print_pod_state(&p);
-                        },
+                        }
                         EventType::Deleted => {
                             let p: Pod = serde_json::from_value(event.object)?;
-                            println!("deleted {}",
-                                     p.metadata.name.unwrap_or("(no name)".into()));
-                        },
+                            println!("deleted {}", p.metadata.name.unwrap_or("(no name)".into()));
+                        }
                         EventType::Error => debug!("Ignoring error event {:#?}", event.object),
                     }
                     Ok(())
@@ -103,7 +124,7 @@ fn main() {
             }
             debug!("Backtrace: {}", e.backtrace());
             1
-        },
+        }
     };
     ::std::process::exit(status);
 }

@@ -1,32 +1,36 @@
+extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
-extern crate serde_json;
-extern crate failure;
 extern crate kubernetes;
 extern crate log;
-extern crate tokio;
 extern crate pretty_env_logger;
+extern crate serde_json;
+extern crate tokio;
 
-use std::result::Result;
 use failure::Error;
 use futures::prelude::*;
+use std::result::Result;
 use tokio::runtime::current_thread;
 
 use kubernetes::api;
-use kubernetes::client::{Client,ListOptions};
-use kubernetes::api::core::v1::{Pod,PodList};
+use kubernetes::api::core::v1::{Pod, PodList};
+use kubernetes::client::{Client, ListOptions};
 
-fn main_() -> Result<(),Error> {
+fn main_() -> Result<(), Error> {
     let client = Client::new()?;
 
     let pods = api::core::v1::GROUP_VERSION.with_resource("pods");
     let namespace = Some("kube-system");
 
     // Artificially low `limit`, to demonstrate pagination
-    let opts = ListOptions { limit: 2, ..Default::default() };
+    let opts = ListOptions {
+        limit: 2,
+        ..Default::default()
+    };
 
-    let names_future = client.iter::<PodList,Pod>(&pods, namespace, opts)
+    let names_future = client
+        .iter::<PodList, Pod>(&pods, namespace, opts)
         .map(|pod| pod.metadata.name.unwrap_or("(no name)".into()))
         .collect();
 
@@ -52,7 +56,7 @@ fn main() {
             }
             eprintln!("{}", e.backtrace());
             1
-        },
+        }
     };
     ::std::process::exit(status);
 }

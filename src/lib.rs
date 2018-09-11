@@ -1,20 +1,24 @@
 //! # Kubernetes client
 
-extern crate url;
 extern crate serde;
-#[cfg_attr(test,macro_use)] extern crate serde_json;
-#[macro_use] extern crate serde_derive;
+#[cfg_attr(test, macro_use)]
+extern crate serde_json;
+extern crate url;
+#[macro_use]
+extern crate serde_derive;
 extern crate serde_urlencoded;
 extern crate serde_yaml;
-#[macro_use] extern crate failure;
+#[macro_use]
+extern crate failure;
+extern crate base64;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
 extern crate native_tls;
-extern crate tokio_core;
-extern crate base64;
 extern crate openssl;
-#[macro_use] extern crate log;
+extern crate tokio_core;
+#[macro_use]
+extern crate log;
 
 pub mod api;
 pub mod client;
@@ -22,10 +26,10 @@ mod groupversion;
 mod serde_base64;
 mod unstructured;
 
-use std::slice;
 use std::borrow::Cow;
+use std::slice;
 
-use api::meta::v1::{ObjectMeta,ListMeta};
+use api::meta::v1::{ListMeta, ObjectMeta};
 
 pub use groupversion::*;
 pub use unstructured::*;
@@ -63,8 +67,8 @@ impl<'a, T> IntoIterator for &'a mut List<T> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{self,Value};
     use super::Metadata;
+    use serde_json::{self, Value};
 
     fn pod_json() -> Value {
         json!({

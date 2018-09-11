@@ -1,15 +1,18 @@
-use std::default::Default;
+use api::meta::v1::{ItemList, LabelSelector, ObjectMeta};
+use api::{IntOrString, Integer, Quantity, Time, TypeMeta, TypeMetaStruct};
+use serde_json::{self, Map, Value};
 use std::borrow::Cow;
-use api::meta::v1::{ObjectMeta,LabelSelector,ItemList};
-use api::{Integer,Time,Quantity,IntOrString,TypeMeta,TypeMetaStruct};
-use {GroupVersion,Metadata};
-use serde_json::{self,Map,Value};
+use std::default::Default;
+use {GroupVersion, Metadata};
 
 const API_GROUP: &str = "v1";
-pub const GROUP_VERSION: GroupVersion = GroupVersion{group: "", version: "v1"};
+pub const GROUP_VERSION: GroupVersion = GroupVersion {
+    group: "",
+    version: "v1",
+};
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Pod {
     #[serde(flatten)]
     typemeta: TypeMetaStruct<Pod>,
@@ -24,32 +27,42 @@ pub struct Pod {
 pub type PodList = ItemList<Pod>;
 
 impl TypeMeta for Pod {
-    fn api_version() -> &'static str {API_GROUP}
-    fn kind() -> &'static str {"Pod"}
+    fn api_version() -> &'static str {
+        API_GROUP
+    }
+    fn kind() -> &'static str {
+        "Pod"
+    }
 }
 
 impl Metadata for Pod {
-    fn api_version(&self) -> &str { <Pod as TypeMeta>::api_version() }
-    fn kind(&self) -> &str { <Pod as TypeMeta>::kind() }
-    fn metadata(&self) -> Cow<ObjectMeta> { Cow::Borrowed(&self.metadata) }
+    fn api_version(&self) -> &str {
+        <Pod as TypeMeta>::api_version()
+    }
+    fn kind(&self) -> &str {
+        <Pod as TypeMeta>::kind()
+    }
+    fn metadata(&self) -> Cow<ObjectMeta> {
+        Cow::Borrowed(&self.metadata)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodTemplateSpec {
     pub metadata: ObjectMeta,
     pub spec: PodSpec,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodSpec {
     pub active_deadline_seconds: Option<Integer>,
     pub affinity: Option<Affinity>,
     pub automount_service_account_token: Option<bool>,
     #[serde(default)]
     pub containers: Vec<Container>,
-    #[serde(default="clusterfirst")]
+    #[serde(default = "clusterfirst")]
     pub dns_policy: DNSPolicy,
     #[serde(default)]
     pub host_aliases: Vec<HostAlias>,
@@ -57,7 +70,7 @@ pub struct PodSpec {
     pub host_ipc: bool,
     #[serde(default)]
     pub host_network: bool,
-    #[serde(default, rename="hostPID")]
+    #[serde(default, rename = "hostPID")]
     pub host_pid: bool,
     pub hostname: Option<String>,
     #[serde(default)]
@@ -69,14 +82,14 @@ pub struct PodSpec {
     pub node_selector: Map<String, Value>,
     pub priority: Option<Integer>,
     pub priority_class_name: Option<String>,
-    #[serde(default="always")]
+    #[serde(default = "always")]
     pub restart_policy: RestartPolicy,
     pub scheduler_name: Option<String>,
     pub security_context: Option<PodSecurityContext>,
     pub service_account: Option<String>,
     pub service_account_name: Option<String>,
     pub subdomain: Option<String>,
-    #[serde(default="int30")]
+    #[serde(default = "int30")]
     pub termination_grace_period_seconds: Integer,
     #[serde(default)]
     pub tolerations: Vec<Toleration>,
@@ -95,9 +108,15 @@ fn podspec_default() {
     let _: PodSpec = Default::default();
 }
 
-fn clusterfirst() -> DNSPolicy { DNSPolicy::ClusterFirst }
-fn always() -> RestartPolicy { RestartPolicy::Always }
-fn int30() -> Integer { 30 }
+fn clusterfirst() -> DNSPolicy {
+    DNSPolicy::ClusterFirst
+}
+fn always() -> RestartPolicy {
+    RestartPolicy::Always
+}
+fn int30() -> Integer {
+    30
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum DNSPolicy {
@@ -114,7 +133,7 @@ pub enum RestartPolicy {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Affinity {
     pub node_affinity: Option<NodeAffinity>,
     pub pod_affinity: Option<PodAffinity>,
@@ -122,7 +141,7 @@ pub struct Affinity {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct NodeAffinity {
     #[serde(default)]
     pub preferred_during_scheduling_ignored_during_execution: Vec<PreferredSchedulingTerm>,
@@ -130,26 +149,26 @@ pub struct NodeAffinity {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PreferredSchedulingTerm {
     pub preference: Option<NodeSelectorTerm>,
     pub weight: Option<Integer>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct NodeSelector {
     pub node_selector_terms: Vec<NodeSelectorTerm>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct NodeSelectorTerm {
     pub match_expressions: Vec<NodeSelectorRequirement>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct NodeSelectorRequirement {
     pub key: String,
     pub operator: NodeSelectorOperator,
@@ -168,7 +187,7 @@ pub enum NodeSelectorOperator {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodAffinity {
     pub preferred_during_scheduling_ignored_during_execution: Option<WeightedPodAffinityTerm>,
     #[serde(default)]
@@ -176,14 +195,14 @@ pub struct PodAffinity {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct WeightedPodAffinityTerm {
     pub pod_affinity_term: PodAffinityTerm,
     pub weight: Integer,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodAffinityTerm {
     pub label_selector: LabelSelector,
     #[serde(default)]
@@ -192,7 +211,7 @@ pub struct PodAffinityTerm {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodAntiAffinity {
     #[serde(default)]
     pub preferred_during_scheduling_ignored_during_execution: Vec<WeightedPodAffinityTerm>,
@@ -201,7 +220,7 @@ pub struct PodAntiAffinity {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Container {
     #[serde(default)]
     pub args: Vec<String>,
@@ -228,9 +247,9 @@ pub struct Container {
     pub stdin_once: bool,
     #[serde(default)]
     pub tty: bool,
-    #[serde(default="devterminationlog")]
+    #[serde(default = "devterminationlog")]
     pub termination_message_path: String,
-    #[serde(default="file")]
+    #[serde(default = "file")]
     pub termination_message_policy: TerminationMessagePolicy,
     #[serde(default)]
     pub volume_mounts: Vec<VolumeMount>,
@@ -248,8 +267,12 @@ fn container_default() {
     let _: Container = Default::default();
 }
 
-fn devterminationlog() -> String { "/dev/termination-log".into() }
-fn file() -> TerminationMessagePolicy { TerminationMessagePolicy::File }
+fn devterminationlog() -> String {
+    "/dev/termination-log".into()
+}
+fn file() -> TerminationMessagePolicy {
+    TerminationMessagePolicy::File
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum PullPolicy {
@@ -265,7 +288,7 @@ pub enum TerminationMessagePolicy {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct EnvVar {
     pub name: String,
     #[serde(default)]
@@ -274,7 +297,7 @@ pub struct EnvVar {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum EnvVarSource {
     ConfigMapKeyRef(ConfigMapKeySelector),
     FieldRef(ObjectFieldSelector),
@@ -283,7 +306,7 @@ pub enum EnvVarSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigMapKeySelector {
     pub key: String,
     pub name: String,
@@ -291,29 +314,33 @@ pub struct ConfigMapKeySelector {
     pub optional: bool,
 }
 
-fn v1() -> String { "v1".into() }
+fn v1() -> String {
+    "v1".into()
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ObjectFieldSelector {
-    #[serde(default="v1")]
+    #[serde(default = "v1")]
     pub api_version: String,
     pub field_path: String,
 }
 
-fn quant1() -> Quantity { "1".into() }
+fn quant1() -> Quantity {
+    "1".into()
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceFieldSelector {
     pub container_name: Option<String>,
-    #[serde(default="quant1")]
+    #[serde(default = "quant1")]
     pub divisor: Quantity,
     pub resource: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct SecretKeySelector {
     pub key: String,
     pub name: String,
@@ -322,7 +349,7 @@ pub struct SecretKeySelector {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct EnvFromSource {
     pub prefix: Option<String>,
     pub config_map_ref: Option<ConfigMapEnvSource>,
@@ -330,7 +357,7 @@ pub struct EnvFromSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigMapEnvSource {
     pub name: String,
     #[serde(default)]
@@ -338,7 +365,7 @@ pub struct ConfigMapEnvSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct SecretEnvSource {
     pub name: String,
     #[serde(default)]
@@ -346,14 +373,14 @@ pub struct SecretEnvSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Lifecycle {
     pub post_start: Option<Handler>,
     pub pre_stop: Option<Handler>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum Handler {
     Exec(ExecAction),
     HttpGet(HTTPGetAction),
@@ -361,74 +388,84 @@ pub enum Handler {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ExecAction {
     pub command: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct HTTPGetAction {
     pub host: Option<String>,
     #[serde(default)]
     pub http_headers: Vec<HTTPHeader>,
     pub path: String,
     pub port: IntOrString,
-    #[serde(default="http")]
+    #[serde(default = "http")]
     pub scheme: String,
 }
 
-fn http() -> String { "HTTP".into() }
+fn http() -> String {
+    "HTTP".into()
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct HTTPHeader {
     pub name: String,
     pub value: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct TCPSocketAction {
     pub host: Option<String>,
     pub port: IntOrString,
 }
 
-fn int1() -> Integer { 1 }
-fn int3() -> Integer { 3 }
-fn int10() -> Integer { 10 }
+fn int1() -> Integer {
+    1
+}
+fn int3() -> Integer {
+    3
+}
+fn int10() -> Integer {
+    10
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Probe {
     pub exec: Option<ExecAction>,
     pub http_get: Option<HTTPGetAction>,
     pub tcp_socket: Option<TCPSocketAction>,
-    #[serde(default="int3")]
+    #[serde(default = "int3")]
     pub failure_threshold: Integer,
     #[serde(default)]
     pub initial_delay_seconds: Integer,
-    #[serde(default="int10")]
+    #[serde(default = "int10")]
     pub period_seconds: Integer,
-    #[serde(default="int1")]
+    #[serde(default = "int1")]
     pub success_threshold: Integer,
-    #[serde(default="int1")]
+    #[serde(default = "int1")]
     pub timeout_seconds: Integer,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ContainerPort {
     pub container_port: Integer,
-    #[serde(rename="hostIP")]
+    #[serde(rename = "hostIP")]
     pub host_ip: Option<String>,
     pub host_port: Option<Integer>,
     pub name: Option<String>,
-    #[serde(default="tcp")]
+    #[serde(default = "tcp")]
     pub protocol: Protocol,
 }
 
-fn tcp() -> Protocol { Protocol::TCP }
+fn tcp() -> Protocol {
+    Protocol::TCP
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum Protocol {
@@ -437,16 +474,16 @@ pub enum Protocol {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceRequirements {
     #[serde(default)]
-    pub limits: Map<String,Value>,
+    pub limits: Map<String, Value>,
     #[serde(default)]
-    pub requests: Map<String,Value>,
+    pub requests: Map<String, Value>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct SecurityContext {
     pub allow_privilege_escalation: Option<bool>,
     pub capabilities: Option<Capabilities>,
@@ -457,12 +494,12 @@ pub struct SecurityContext {
     #[serde(default)]
     pub run_as_non_root: bool,
     pub run_as_user: Option<Integer>,
-    #[serde(rename="seLinuxOptions")]
+    #[serde(rename = "seLinuxOptions")]
     pub selinux_options: Option<SELinuxOptions>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     #[serde(default)]
     pub add: Vec<String>,
@@ -471,17 +508,17 @@ pub struct Capabilities {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct SELinuxOptions {
     pub level: String,
     pub role: String,
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub typ: String,
     pub user: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct VolumeMount {
     pub mount_path: String,
     pub mount_propagation: Option<String>,
@@ -493,20 +530,20 @@ pub struct VolumeMount {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct HostAlias {
     pub hostnames: Vec<String>,
     pub ip: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct LocalObjectReference {
     pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodSecurityContext {
     pub fs_group: Option<Integer>,
     #[serde(default)]
@@ -514,7 +551,7 @@ pub struct PodSecurityContext {
     pub run_as_user: Option<Integer>,
     #[serde(default)]
     pub supplemental_groups: Vec<Integer>,
-    #[serde(rename="seLinuxOptions")]
+    #[serde(rename = "seLinuxOptions")]
     pub selinux_options: Option<SELinuxOptions>,
 }
 
@@ -531,21 +568,23 @@ pub enum TolerationOperator {
     Equal,
 }
 
-fn equal() -> TolerationOperator { TolerationOperator::Equal }
+fn equal() -> TolerationOperator {
+    TolerationOperator::Equal
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Toleration {
     pub effect: Option<TaintEffect>,
     pub key: Option<String>,
-    #[serde(default="equal")]
+    #[serde(default = "equal")]
     pub operator: TolerationOperator,
     pub toleration_seconds: Option<Integer>,
     pub value: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Volume {
     pub name: String,
     #[serde(flatten)]
@@ -554,7 +593,7 @@ pub struct Volume {
 
 // This is not a real k8s type
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum VolumeSource {
     //#[serde(rename="awsElasticBlockStore")]
     //AwsElasticBlockStore(AWSElasticBlockStoreVolumeSource),
@@ -564,7 +603,7 @@ pub enum VolumeSource {
     //CephFS(CephFSVolumeSource),
     //Cinder(CinderVolumeSource),
     ConfigMap(ConfigMapVolumeSource),
-    #[serde(rename="downwardAPI")]
+    #[serde(rename = "downwardAPI")]
     DownwardAPI(DownwardAPIVolumeSource),
     EmptyDir(EmptyDirVolumeSource),
     //#[serde(rename="fc")]
@@ -578,7 +617,7 @@ pub enum VolumeSource {
     HostPath(HostPathVolumeSource),
     //#[serde(rename="iscsi")]
     //ISCSI(ISCSIVolumeSource),
-    #[serde(rename="nfs")]
+    #[serde(rename = "nfs")]
     NFS(NFSVolumeSource),
     PersistentVolumeClaim(PersistentVolumeClaimVolumeSource),
     //photonPersistentDisk
@@ -592,12 +631,14 @@ pub enum VolumeSource {
     //vsphereVolume
 }
 
-fn int0644() -> Integer { 0o644 }
+fn int0644() -> Integer {
+    0o644
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigMapVolumeSource {
-    #[serde(default="int0644")]
+    #[serde(default = "int0644")]
     pub default_mode: Integer,
     #[serde(default)]
     pub items: Vec<KeyToPath>,
@@ -607,7 +648,7 @@ pub struct ConfigMapVolumeSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct KeyToPath {
     pub key: String,
     pub mode: Option<Integer>,
@@ -615,16 +656,16 @@ pub struct KeyToPath {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DownwardAPIVolumeSource {
-    #[serde(default="int0644")]
+    #[serde(default = "int0644")]
     pub default_mode: Integer,
     #[serde(default)]
     pub items: Vec<DownwardAPIVolumeFile>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DownwardAPIVolumeFile {
     pub field_ref: Option<ObjectFieldSelector>,
     pub mode: Option<Integer>,
@@ -633,7 +674,7 @@ pub struct DownwardAPIVolumeFile {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct EmptyDirVolumeSource {
     #[serde(default)]
     pub medium: String,
@@ -641,15 +682,15 @@ pub struct EmptyDirVolumeSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct HostPathVolumeSource {
     pub path: String,
-    #[serde(default,rename="type")]
+    #[serde(default, rename = "type")]
     pub typ: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct NFSVolumeSource {
     pub path: String,
     #[serde(default)]
@@ -658,7 +699,7 @@ pub struct NFSVolumeSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PersistentVolumeClaimVolumeSource {
     pub claim_name: String,
     #[serde(default)]
@@ -666,9 +707,9 @@ pub struct PersistentVolumeClaimVolumeSource {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct SecretVolumeSource {
-    #[serde(default="int0644")]
+    #[serde(default = "int0644")]
     pub default_mode: Integer,
     #[serde(default)]
     pub items: Vec<KeyToPath>,
@@ -685,16 +726,16 @@ pub enum ConditionStatus {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodStatus {
     pub phase: Option<PodPhase>,
     #[serde(default)]
     pub conditions: Vec<PodCondition>,
     pub message: Option<String>,
     pub reason: Option<String>,
-    #[serde(rename="hostIP")]
+    #[serde(rename = "hostIP")]
     pub host_ip: Option<String>,
-    #[serde(rename="podIP")]
+    #[serde(rename = "podIP")]
     pub pod_ip: Option<String>,
     pub start_time: Option<Time>,
     #[serde(default)]
@@ -713,9 +754,9 @@ pub enum PodConditionType {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct PodCondition {
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub typ: PodConditionType,
     pub status: ConditionStatus,
     pub last_probe_time: Option<Time>,
@@ -725,7 +766,7 @@ pub struct PodCondition {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ContainerStatus {
     pub name: String,
     pub state: Option<ContainerState>,
@@ -733,9 +774,9 @@ pub struct ContainerStatus {
     pub ready: bool,
     pub restart_count: Integer,
     pub image: String,
-    #[serde(rename="imageID")]
+    #[serde(rename = "imageID")]
     pub image_id: String,
-    #[serde(rename="containerID")]
+    #[serde(rename = "containerID")]
     pub container_id: Option<String>,
 }
 
@@ -756,7 +797,7 @@ pub enum PodQOSClass {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub enum ContainerState {
     Waiting(ContainerStateWaiting),
     Running(ContainerStateRunning),
@@ -764,20 +805,20 @@ pub enum ContainerState {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ContainerStateWaiting {
     pub reason: Option<String>,
     pub message: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ContainerStateRunning {
     pub started_at: Option<Time>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ContainerStateTerminated {
     pub exit_code: Integer,
     pub signal: Option<Integer>,
@@ -785,7 +826,7 @@ pub struct ContainerStateTerminated {
     pub message: Option<String>,
     pub started_at: Option<Time>,
     pub finished_at: Option<Time>,
-    #[serde(rename="container_ID")]
+    #[serde(rename = "container_ID")]
     pub container_id: Option<String>,
 }
 
@@ -894,11 +935,13 @@ fn deser_pod() {
     assert_eq!(pod.status.phase, Some(PodPhase::Running));
     assert_eq!(pod.spec.volumes.len(), 1);
     assert_eq!(pod.spec.volumes[0].name, "etcd");
-    assert_eq!(pod.spec.volumes[0].source,
-               VolumeSource::HostPath(HostPathVolumeSource{
-                   path: String::from("/data"),
-                   typ: String::from("DirectoryOrCreate"),
-               }));
+    assert_eq!(
+        pod.spec.volumes[0].source,
+        VolumeSource::HostPath(HostPathVolumeSource {
+            path: String::from("/data"),
+            typ: String::from("DirectoryOrCreate"),
+        })
+    );
 
     // roundtrip
     let rt_json = ::serde_json::to_value(&pod).unwrap();

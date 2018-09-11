@@ -1,30 +1,36 @@
-use super::super::meta::v1::{ObjectMeta,LabelSelector};
-use super::super::core::v1::{PodTemplateSpec,ConditionStatus};
-use super::super::{Integer,Time,IntOrString};
+use super::super::core::v1::{ConditionStatus, PodTemplateSpec};
+use super::super::meta::v1::{LabelSelector, ObjectMeta};
+use super::super::{IntOrString, Integer, Time};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct Deployment {
     pub metadata: ObjectMeta,
     pub spec: DeploymentSpec,
     pub status: DeploymentStatus,
 }
 
-fn int1() -> Integer { 1 }
-fn int10() -> Integer { 10 }
-fn int600() -> Integer { 600 }
+fn int1() -> Integer {
+    1
+}
+fn int10() -> Integer {
+    10
+}
+fn int600() -> Integer {
+    600
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DeploymentSpec {
     #[serde(default)]
     pub min_ready_seconds: Integer,
     pub paused: bool,
-    #[serde(default="int600")]
+    #[serde(default = "int600")]
     pub progress_deadline_seconds: Integer,
-    #[serde(default="int1")]
+    #[serde(default = "int1")]
     pub replicas: Integer,
-    #[serde(default="int10")]
+    #[serde(default = "int10")]
     pub revision_history_limit: Integer,
     pub selector: LabelSelector,
     pub strategy: DeploymentStrategy,
@@ -33,9 +39,9 @@ pub struct DeploymentSpec {
 
 // TODO: This should be an enum, with a redundant adjacent/external tag
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DeploymentStrategy {
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub typ: DeploymentStrategyType,
     pub rolling_update: Option<RollingUpdateDeployment>,
 }
@@ -47,14 +53,14 @@ pub enum DeploymentStrategyType {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct RollingUpdateDeployment {
     pub max_surge: Option<IntOrString>,
     pub max_unavailable: Option<IntOrString>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DeploymentStatus {
     pub available_replicas: Integer,
     pub collision_count: Integer,
@@ -68,9 +74,9 @@ pub struct DeploymentStatus {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DeploymentCondition {
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub typ: DeploymentConditionType,
     pub status: ConditionStatus,
     pub last_update_time: Option<Time>,

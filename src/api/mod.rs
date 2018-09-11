@@ -1,13 +1,13 @@
+use serde::de::{self, Deserialize, Deserializer, Unexpected};
+use serde::ser::{Serialize, Serializer};
+use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
-use std::borrow::Cow;
-use serde::ser::{Serialize,Serializer};
-use serde::de::{self,Deserialize,Deserializer,Unexpected};
 
-pub mod meta;
-pub mod core;
 pub mod apps;
+pub mod core;
 mod intstr;
+pub mod meta;
 
 pub type Time = String;
 pub type Integer = i32;
@@ -25,7 +25,7 @@ pub trait TypeMeta {
 
 /// Zero-sized struct that serializes to/from apiVersion/kind struct
 /// based on type parameter.
-#[derive(Default,Debug,Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct TypeMetaStruct<T>(PhantomData<T>);
 
 impl<T: TypeMeta> ::serde::de::Expected for TypeMetaStruct<T> {
@@ -35,12 +35,14 @@ impl<T: TypeMeta> ::serde::de::Expected for TypeMetaStruct<T> {
 }
 
 impl<T> PartialEq for TypeMetaStruct<T> {
-    fn eq(&self, _rhs: &Self) -> bool { true }
+    fn eq(&self, _rhs: &Self) -> bool {
+        true
+    }
 }
 
 /// Like TypeMetaStruct, but contains non-constant apiVersion/kind.
-#[derive(Serialize,Deserialize)]
-#[serde(rename="TypeMeta",rename_all="camelCase")]
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "TypeMeta", rename_all = "camelCase")]
 struct TypeMetaRuntime<'a> {
     #[serde(borrow)]
     api_version: Option<Cow<'a, str>>,
@@ -50,9 +52,10 @@ struct TypeMetaRuntime<'a> {
 
 impl<T: TypeMeta> Serialize for TypeMetaStruct<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer
+    where
+        S: Serializer,
     {
-        let tmp = TypeMetaRuntime{
+        let tmp = TypeMetaRuntime {
             api_version: Some(Cow::from(T::api_version())),
             kind: Some(Cow::from(T::kind())),
         };
@@ -62,7 +65,8 @@ impl<T: TypeMeta> Serialize for TypeMetaStruct<T> {
 
 impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaStruct<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: Deserializer<'de>
+    where
+        D: Deserializer<'de>,
     {
         let t = TypeMetaRuntime::deserialize(deserializer)?;
         let ret = TypeMetaStruct(PhantomData);
@@ -74,7 +78,7 @@ impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaStruct<T> {
                     let found = format!("{}/{}", a, k);
                     Err(de::Error::invalid_value(Unexpected::Other(&found), &ret))
                 }
-            },
+            }
 
             // No apiVersion/kind specified -> assume valid in context
             (None, None) => Ok(ret),
@@ -89,55 +93,80 @@ impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaStruct<T> {
 #[cfg(test)]
 mod tests {
     extern crate serde_test;
-    use self::serde_test::{Token,assert_tokens,assert_de_tokens,assert_de_tokens_error};
+    use self::serde_test::{assert_de_tokens, assert_de_tokens_error, assert_tokens, Token};
     use super::*;
 
     #[derive(Debug)]
     struct TestType;
     impl TypeMeta for TestType {
-        fn api_version() -> &'static str {"v1alpha1"}
-        fn kind() -> &'static str {"Test"}
+        fn api_version() -> &'static str {
+            "v1alpha1"
+        }
+        fn kind() -> &'static str {
+            "Test"
+        }
     }
 
     #[test]
     fn test_typemeta_serde() {
         let t: TypeMetaStruct<TestType> = TypeMetaStruct(PhantomData);
 
-        assert_tokens(&t, &[
-            Token::Struct{name: "TypeMeta", len: 2},
-            Token::Str("apiVersion"),
-            Token::Some,
-            Token::BorrowedStr("v1alpha1"),
-            Token::Str("kind"),
-            Token::Some,
-            Token::BorrowedStr("Test"),
-            Token::StructEnd,
-        ]);
+        assert_tokens(
+            &t,
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 2,
+                },
+                Token::Str("apiVersion"),
+                Token::Some,
+                Token::BorrowedStr("v1alpha1"),
+                Token::Str("kind"),
+                Token::Some,
+                Token::BorrowedStr("Test"),
+                Token::StructEnd,
+            ],
+        );
 
         // Reversed order of fields
-        assert_de_tokens(&t, &[
-            Token::Struct{name: "TypeMeta", len: 2},
-            Token::Str("kind"),
-            Token::Some,
-            Token::BorrowedStr("Test"),
-            Token::Str("apiVersion"),
-            Token::Some,
-            Token::BorrowedStr("v1alpha1"),
-            Token::StructEnd,
-        ]);
+        assert_de_tokens(
+            &t,
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 2,
+                },
+                Token::Str("kind"),
+                Token::Some,
+                Token::BorrowedStr("Test"),
+                Token::Str("apiVersion"),
+                Token::Some,
+                Token::BorrowedStr("v1alpha1"),
+                Token::StructEnd,
+            ],
+        );
 
         // No apiVersion/kind is also ok
-        assert_de_tokens(&t, &[
-            Token::Struct{name: "TypeMeta", len: 0},
-            Token::StructEnd,
-        ]);
+        assert_de_tokens(
+            &t,
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 0,
+                },
+                Token::StructEnd,
+            ],
+        );
     }
 
     #[test]
     fn test_typemeta_serde_error() {
         assert_de_tokens_error::<TypeMetaStruct<TestType>>(
             &[
-                Token::Struct{name: "TypeMeta", len: 1},
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 1,
+                },
                 Token::Str("kind"),
                 Token::Some,
                 Token::BorrowedStr("TestType"),
@@ -148,7 +177,10 @@ mod tests {
 
         assert_de_tokens_error::<TypeMetaStruct<TestType>>(
             &[
-                Token::Struct{name: "TypeMeta", len: 1},
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 1,
+                },
                 Token::Str("apiVersion"),
                 Token::Some,
                 Token::BorrowedStr("bogus"),
@@ -159,7 +191,10 @@ mod tests {
 
         assert_de_tokens_error::<TypeMetaStruct<TestType>>(
             &[
-                Token::Struct{name: "TypeMeta", len: 1},
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 1,
+                },
                 Token::Str("apiVersion"),
                 Token::Some,
                 Token::Str("v1alpha1"),
@@ -171,7 +206,10 @@ mod tests {
 
         assert_de_tokens_error::<TypeMetaStruct<TestType>>(
             &[
-                Token::Struct{name: "TypeMeta", len: 2},
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 2,
+                },
                 Token::Str("kind"),
                 Token::Some,
                 Token::Str("NotTest"),
