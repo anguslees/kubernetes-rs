@@ -1,6 +1,6 @@
+use std::convert::From;
 use std::fmt;
 use std::result::Result;
-use std::convert::From;
 
 use super::Metadata;
 
@@ -28,13 +28,19 @@ impl<'a> fmt::Display for GroupVersionKind<'a> {
 
 impl<'a> From<GroupVersionKind<'a>> for GroupKind<'a> {
     fn from(gvk: GroupVersionKind<'a>) -> Self {
-        GroupKind{group: gvk.group, kind: gvk.kind}
+        GroupKind {
+            group: gvk.group,
+            kind: gvk.kind,
+        }
     }
 }
 
 impl<'a> From<GroupVersionKind<'a>> for GroupVersion<'a> {
     fn from(gvk: GroupVersionKind<'a>) -> Self {
-        GroupVersion{group: gvk.group, version: gvk.version}
+        GroupVersion {
+            group: gvk.group,
+            version: gvk.version,
+        }
     }
 }
 
@@ -55,20 +61,31 @@ impl<'a> GroupVersion<'a> {
                 let (a, b) = s.split_at(i);
                 let b = &b[1..];
                 if b.find('/').is_some() {
-                    return Err(InvalidGroupVersionError{value: s.into()});
+                    return Err(InvalidGroupVersionError { value: s.into() });
                 }
                 (a, b)
             }
         };
-        Ok(GroupVersion{group: g, version: v})
+        Ok(GroupVersion {
+            group: g,
+            version: v,
+        })
     }
 
     pub fn with_kind(self, kind: &'a str) -> GroupVersionKind<'a> {
-        GroupVersionKind{group: self.group, version: self.version, kind: kind}
+        GroupVersionKind {
+            group: self.group,
+            version: self.version,
+            kind: kind,
+        }
     }
 
     pub fn with_resource(self, rsrc: &'a str) -> GroupVersionResource<'a> {
-        GroupVersionResource{group: self.group, version: self.version, resource: rsrc}
+        GroupVersionResource {
+            group: self.group,
+            version: self.version,
+            resource: rsrc,
+        }
     }
 }
 
@@ -93,7 +110,10 @@ pub struct InvalidGroupVersionError {
 #[test]
 fn gv_fromstr() {
     fn gv<'a>(g: &'a str, v: &'a str) -> GroupVersion<'a> {
-        GroupVersion{group: g, version: v}
+        GroupVersion {
+            group: g,
+            version: v,
+        }
     }
     assert_eq!(GroupVersion::from_str("v1").unwrap(), gv("", "v1"));
     assert_eq!(GroupVersion::from_str("v2").unwrap(), gv("", "v2"));
@@ -114,7 +134,11 @@ pub struct GroupKind<'a> {
 
 impl<'a> GroupKind<'a> {
     pub fn with_version(self, v: &'a str) -> GroupVersionKind {
-        GroupVersionKind{group: self.group, version: v, kind: self.kind}
+        GroupVersionKind {
+            group: self.group,
+            version: v,
+            kind: self.kind,
+        }
     }
 }
 
@@ -134,19 +158,29 @@ pub struct GroupVersionResource<'a> {
 
 impl<'a> From<GroupVersionResource<'a>> for GroupResource<'a> {
     fn from(gvr: GroupVersionResource<'a>) -> Self {
-        GroupResource{group: gvr.group, resource: gvr.resource}
+        GroupResource {
+            group: gvr.group,
+            resource: gvr.resource,
+        }
     }
 }
 
 impl<'a> From<GroupVersionResource<'a>> for GroupVersion<'a> {
     fn from(gvr: GroupVersionResource<'a>) -> Self {
-        GroupVersion{group: gvr.group, version: gvr.version}
+        GroupVersion {
+            group: gvr.group,
+            version: gvr.version,
+        }
     }
 }
 
 impl<'a> fmt::Display for GroupVersionResource<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}/{}, Resource={}", self.group, self.version, self.resource)
+        write!(
+            f,
+            "{}/{}, Resource={}",
+            self.group, self.version, self.resource
+        )
     }
 }
 
@@ -171,11 +205,18 @@ impl<'a> GroupResource<'a> {
                 (&b[1..], a)
             }
         };
-        Ok(GroupResource{group: g, resource: r})
+        Ok(GroupResource {
+            group: g,
+            resource: r,
+        })
     }
 
     pub fn with_version(self, v: &'a str) -> GroupVersionResource<'a> {
-        GroupVersionResource{group: self.group, version: v, resource: self.resource}
+        GroupVersionResource {
+            group: self.group,
+            version: v,
+            resource: self.resource,
+        }
     }
 }
 
@@ -188,7 +229,10 @@ impl<'a> fmt::Display for GroupResource<'a> {
 #[test]
 fn gr_fromstr() {
     fn gr<'a>(g: &'a str, r: &'a str) -> GroupResource<'a> {
-        GroupResource{group: g, resource: r}
+        GroupResource {
+            group: g,
+            resource: r,
+        }
     }
     assert_eq!(GroupResource::from_str("v1").unwrap(), gr("", "v1"));
     assert_eq!(GroupResource::from_str(".v1").unwrap(), gr("v1", ""));

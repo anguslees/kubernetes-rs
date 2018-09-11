@@ -5,8 +5,28 @@ rust:
   - beta
   - nightly
 
+env:
+  # travis "cache: cargo" seems to ignore the Rust version, resulting
+  # in rebuilding everything every time.
+  - CACHE_KEY=$TRAVIS_RUST_VERSION
+
 matrix:
   allow_failures:
     - rust: nightly
 
 cache: cargo
+
+before_script:
+  - rustup component add rustfmt-preview
+  - cargo fmt --version
+
+script:
+  - |
+    # rustfmt --check seems to output nonsense diffs and exit codes
+    # sometimes, so workaround it:
+    if [ $TRAVIS_RUST_VERSION != beta ]; then
+        cargo fmt --all
+        git diff --exit-code
+    fi
+  - cargo build --verbose --all
+  - cargo test --verbose --all

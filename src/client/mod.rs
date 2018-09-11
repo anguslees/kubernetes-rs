@@ -1,27 +1,27 @@
+use failure::{Error, ResultExt};
 use futures::{future, stream, Future, Stream};
+use hyper::header::{HeaderValue, CONTENT_TYPE};
+use hyper::{self, Body, Method, Request};
 use hyper_tls::HttpsConnector;
-use native_tls::{TlsConnector,Identity,Certificate};
-use hyper::{self,Method,Body,Request};
-use hyper::header::{CONTENT_TYPE,HeaderValue};
-use serde_json;
+use native_tls::{Certificate, Identity, TlsConnector};
+use openssl;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json;
 use serde_urlencoded;
-use url::Url;
 use std::default::Default;
-use std::fmt;
 use std::env;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use failure::{Error,ResultExt};
-use openssl;
+use url::Url;
 
 pub mod config;
 mod resplit;
 
 use self::config::ConfigContext;
-use super::{Metadata,List,GroupVersionResource};
-use super::api::meta::v1::{WatchEvent,Status};
+use super::api::meta::v1::{Status, WatchEvent};
+use super::{GroupVersionResource, List, Metadata};
 
 #[derive(Fail, Debug)]
 #[fail(display = "HTTP client error: {}", err)]
@@ -41,10 +41,10 @@ pub struct RequiredAttributeError {
     attr: &'static str,
 }
 pub fn required_attr(attr: &'static str) -> RequiredAttributeError {
-    RequiredAttributeError{attr: attr}
+    RequiredAttributeError { attr: attr }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Client<C> {
     client: Arc<hyper::Client<C>>,
     config: ConfigContext,
@@ -58,7 +58,8 @@ impl Client<HttpsConnector<hyper::client::HttpConnector>> {
     }
 
     pub fn new_from_http(http: hyper::client::HttpConnector) -> Result<Self, Error> {
-        let config_path = env::var_os(config::CONFIG_ENV).map(PathBuf::from)
+        let config_path = env::var_os(config::CONFIG_ENV)
+            .map(PathBuf::from)
             .or_else(config::default_path)
             .ok_or(format_err!("Unable to find config"))?;
         debug!("Reading config from {}", config_path.display());
@@ -68,18 +69,23 @@ impl Client<HttpsConnector<hyper::client::HttpConnector>> {
         Client::new_from_context(http, context)
     }
 
-    pub fn new_from_context(mut http: hyper::client::HttpConnector, config: ConfigContext) -> Result<Self, Error> {
+    pub fn new_from_context(
+        mut http: hyper::client::HttpConnector,
+        config: ConfigContext,
+    ) -> Result<Self, Error> {
         http.enforce_http(false);
         let mut tls = TlsConnector::builder();
         if let (Some(certdata), Some(keydata)) = (
-            config.user.client_certificate_read(), config.user.client_key_read()) {
+            config.user.client_certificate_read(),
+            config.user.client_key_read(),
+        ) {
             debug!("Setting user client cert");
             let cert = openssl::x509::X509::from_pem(&certdata?)?;
             let pkey = openssl::pkey::PKey::private_key_from_pem(&keydata?)?;
             // openssl pkcs12 -export -clcerts -inkey kubecfg.key -in kubecfg.crt -out kubecfg.p12 -name "kubecfg"
             let password = "";
-            let p12 = openssl::pkcs12::Pkcs12::builder()
-                .build(password, "kubeconfig", &pkey, &cert)?;
+            let p12 =
+                openssl::pkcs12::Pkcs12::builder().build(password, "kubeconfig", &pkey, &cert)?;
             tls.identity(Identity::from_pkcs12(&p12.to_der()?, password)?);
         }
 
@@ -92,8 +98,8 @@ impl Client<HttpsConnector<hyper::client::HttpConnector>> {
 
         // FIXME: config.cluster.insecure_skip_tls_verify
 
-        let hyper_client = hyper::Client::builder()
-            .build(HttpsConnector::from((http, tls.build()?)));
+        let hyper_client =
+            hyper::Client::builder().build(HttpsConnector::from((http, tls.build()?)));
 
         Self::new_with_client(hyper_client, config)
     }
@@ -101,7 +107,10 @@ impl Client<HttpsConnector<hyper::client::HttpConnector>> {
 
 impl<C> Client<C> {
     pub fn new_with_client(client: hyper::Client<C>, config: ConfigContext) -> Result<Self, Error> {
-        Ok(Client{client: Arc::new(client), config: config})
+        Ok(Client {
+            client: Arc::new(client),
+            config: config,
+        })
     }
 
     pub fn client(&self) -> &hyper::Client<C> {
@@ -114,43 +123,48 @@ fn is_default<T: Default + PartialEq>(v: &T) -> bool {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(default,rename_all="camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct GetOptions {
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub pretty: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-#[serde(default,rename_all="camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct ListOptions {
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub resource_version: String, // Vec<u8>
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub timeout_seconds: u32,
-    #[serde(skip_serializing_if="is_default")]
-    pub watch: bool,  // NB: set explicitly by watch()
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
+    pub watch: bool, // NB: set explicitly by watch()
+    #[serde(skip_serializing_if = "is_default")]
     pub pretty: bool,
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub field_selector: String,
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub label_selector: String,
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub include_uninitialized: bool,
-    #[serde(skip_serializing_if="is_default")]
+    #[serde(skip_serializing_if = "is_default")]
     pub limit: u32,
-    #[serde(skip_serializing_if="is_default",rename="continue")]
+    #[serde(skip_serializing_if = "is_default", rename = "continue")]
     pub continu: String, // Vec<u8>
 }
 
 fn hyper_uri(u: Url) -> hyper::Uri {
-    u.to_string().parse()
+    u.to_string()
+        .parse()
         .expect("attempted to convert invalid uri")
 }
 
-fn do_request<C,T>(client: Arc<hyper::Client<C>>, req: Result<Request<hyper::Body>, Error>) -> impl Future<Item=T, Error=Error> + Send
-where C: hyper::client::connect::Connect + 'static,
-      T: DeserializeOwned + Send + 'static
+fn do_request<C, T>(
+    client: Arc<hyper::Client<C>>,
+    req: Result<Request<hyper::Body>, Error>,
+) -> impl Future<Item = T, Error = Error> + Send
+where
+    C: hyper::client::connect::Connect + 'static,
+    T: DeserializeOwned + Send + 'static,
 {
     future::result(req)
         .inspect(|req|
@@ -185,9 +199,13 @@ where C: hyper::client::connect::Connect + 'static,
         })
 }
 
-fn do_watch<C,T>(client: &Arc<hyper::Client<C>>, req: Result<hyper::Request<hyper::Body>, Error>) -> impl Stream<Item=T, Error=Error> + Send
-where C: hyper::client::connect::Connect + 'static,
-      T: DeserializeOwned + Send + 'static
+fn do_watch<C, T>(
+    client: &Arc<hyper::Client<C>>,
+    req: Result<hyper::Request<hyper::Body>, Error>,
+) -> impl Stream<Item = T, Error = Error> + Send
+where
+    C: hyper::client::connect::Connect + 'static,
+    T: DeserializeOwned + Send + 'static,
 {
     let client = Arc::clone(client);
     future::result(req)
@@ -198,25 +216,37 @@ where C: hyper::client::connect::Connect + 'static,
         .inspect(|res| debug!("Response: {:#?}", res))
         .and_then(|res| {
             let httpstatus = res.status();
-            let r = if httpstatus.is_success() { Ok(res) } else { Err(res) };
+            let r = if httpstatus.is_success() {
+                Ok(res)
+            } else {
+                Err(res)
+            };
             future::result(r)
                 .or_else(move |res| {
                     res.into_body()
-                        .concat2().from_err::<Error>()
+                        .concat2()
+                        .from_err::<Error>()
                         .and_then(move |body| {
                             debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
-                            let status: Status = serde_json::from_slice(body.as_ref())
-                                .map_err(|e| {
+                            let status: Status = serde_json::from_slice(body.as_ref()).map_err(
+                                |e| {
                                     debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
-                                    HttpStatusError{status: httpstatus}
-                                })?;
+                                    HttpStatusError { status: httpstatus }
+                                },
+                            )?;
 
                             Err(status.into())
                         })
                 })
                 .map(|res| {
-                    resplit::new(res.into_body(), |&c| c == b'\n').from_err()
-                        .inspect(|line| debug!("Got line: {:#?}", ::std::str::from_utf8(line).unwrap_or("<invalid utf8>")))
+                    resplit::new(res.into_body(), |&c| c == b'\n')
+                        .from_err()
+                        .inspect(|line| {
+                            debug!(
+                                "Got line: {:#?}",
+                                ::std::str::from_utf8(line).unwrap_or("<invalid utf8>")
+                            )
+                        })
                         .and_then(move |line| {
                             let o: T = serde_json::from_slice(line.as_ref())
                                 .with_context(|e| format!("Unable to parse watch line : {}", e))?;
@@ -227,7 +257,6 @@ where C: hyper::client::connect::Connect + 'static,
         .flatten_stream()
 }
 
-
 impl<C: hyper::client::connect::Connect + 'static> Client<C> {
     fn url<O>(
         &self,
@@ -236,26 +265,32 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         name: Option<&str>,
         opts: O,
     ) -> Result<Url, Error>
-        where O: Serialize + Default + PartialEq + fmt::Debug
+    where
+        O: Serialize + Default + PartialEq + fmt::Debug,
     {
         let mut url: Url = self.config.cluster.server.parse()?;
 
         {
-            let mut path = url.path_segments_mut()
+            let mut path = url
+                .path_segments_mut()
                 .map_err(|_| format_err!("URL scheme does not support paths"))?;
             /* XXX: This looks like a k8s API rooted at (say) /kube on a
              *      reverse proxy will break.
              */
             path.clear();
             /* This knowledge should perhaps be pushed into the group itself */
-            path.push(if gvr.group == "" && gvr.version == "v1" { "api" } else { "apis" });
+            path.push(if gvr.group == "" && gvr.version == "v1" {
+                "api"
+            } else {
+                "apis"
+            });
             if gvr.group != "" {
                 path.push(&gvr.group);
             }
             path.push(&gvr.version);
             namespace.map(|ns| path.extend(&["namespaces", ns]));
             path.push(&gvr.resource);
-            name.map(|n| { path.push(n) });
+            name.map(|n| path.push(n));
         }
 
         if !is_default(&opts) {
@@ -266,22 +301,34 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         Ok(url)
     }
 
-    pub fn get<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, opts: GetOptions) -> impl Future<Item=T, Error=Error> + Send
-        where T: DeserializeOwned + Send + 'static
+    pub fn get<T>(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        name: &str,
+        opts: GetOptions,
+    ) -> impl Future<Item = T, Error = Error> + Send
+    where
+        T: DeserializeOwned + Send + 'static,
     {
-        let req = self.url(gvr, namespace, Some(name), opts)
-            .and_then(|url| {
-                Request::builder()
-                    .method(Method::GET)
-                    .uri(hyper_uri(url))
-                    .body(Body::empty())
-                    .map_err(|e| e.into())
-            });
+        let req = self.url(gvr, namespace, Some(name), opts).and_then(|url| {
+            Request::builder()
+                .method(Method::GET)
+                .uri(hyper_uri(url))
+                .body(Body::empty())
+                .map_err(|e| e.into())
+        });
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn put<T>(&self, gvr: &GroupVersionResource, value: &T, opts: GetOptions) -> impl Future<Item=T, Error=Error> + Send
-        where T: Metadata + Serialize + DeserializeOwned + Send + 'static
+    pub fn put<T>(
+        &self,
+        gvr: &GroupVersionResource,
+        value: &T,
+        opts: GetOptions,
+    ) -> impl Future<Item = T, Error = Error> + Send
+    where
+        T: Metadata + Serialize + DeserializeOwned + Send + 'static,
     {
         let req = || -> Result<_, Error> {
             let metadata = value.metadata();
@@ -292,7 +339,12 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
 
             Request::builder()
                 .method(Method::POST)
-                .uri(hyper_uri(self.url(gvr, namespace.as_ref().map(|v| v.as_str()), Some(&name), opts)?))
+                .uri(hyper_uri(self.url(
+                    gvr,
+                    namespace.as_ref().map(|v| v.as_str()),
+                    Some(&name),
+                    opts,
+                )?))
                 .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                 .body(Body::from(json))
                 .map_err(|e| e.into())
@@ -300,50 +352,69 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn watch(&self, gvr: &GroupVersionResource, namespace: Option<&str>, name: &str, mut opts: ListOptions) -> impl Stream<Item=WatchEvent, Error=Error> + Send
-    {
+    pub fn watch(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        name: &str,
+        mut opts: ListOptions,
+    ) -> impl Stream<Item = WatchEvent, Error = Error> + Send {
         opts.watch = true;
-        let req = self.url(gvr, namespace, Some(name), opts)
-            .and_then(|url| {
-                Request::builder()
-                    .method(Method::GET)
-                    .uri(hyper_uri(url))
-                    .body(Body::empty())
-                    .map_err(|e| e.into())
-            });
+        let req = self.url(gvr, namespace, Some(name), opts).and_then(|url| {
+            Request::builder()
+                .method(Method::GET)
+                .uri(hyper_uri(url))
+                .body(Body::empty())
+                .map_err(|e| e.into())
+        });
         do_watch(&self.client, req)
     }
 
-    pub fn watch_list(&self, gvr: &GroupVersionResource, namespace: Option<&str>, mut opts: ListOptions) -> impl Stream<Item=WatchEvent, Error=Error> + Send
-    {
+    pub fn watch_list(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        mut opts: ListOptions,
+    ) -> impl Stream<Item = WatchEvent, Error = Error> + Send {
         opts.watch = true;
-        let req = self.url(gvr, namespace, None, opts)
-            .and_then(|url| {
-                Request::builder()
-                    .method(Method::GET)
-                    .uri(hyper_uri(url))
-                    .body(Body::empty())
-                    .map_err(|e| e.into())
-            });
+        let req = self.url(gvr, namespace, None, opts).and_then(|url| {
+            Request::builder()
+                .method(Method::GET)
+                .uri(hyper_uri(url))
+                .body(Body::empty())
+                .map_err(|e| e.into())
+        });
         do_watch(&self.client, req)
     }
 
-    pub fn list<T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> impl Future<Item=T, Error=Error> + Send
-        where T: DeserializeOwned + Send + 'static
+    pub fn list<T>(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        opts: ListOptions,
+    ) -> impl Future<Item = T, Error = Error> + Send
+    where
+        T: DeserializeOwned + Send + 'static,
     {
-        let req = self.url(gvr, namespace, None, opts)
-            .and_then(|url| {
-                Request::builder()
-                    .method(Method::GET)
-                    .uri(hyper_uri(url))
-                    .body(Body::empty())
-                    .map_err(|e| e.into())
-            });
+        let req = self.url(gvr, namespace, None, opts).and_then(|url| {
+            Request::builder()
+                .method(Method::GET)
+                .uri(hyper_uri(url))
+                .body(Body::empty())
+                .map_err(|e| e.into())
+        });
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn iter<L,T>(&self, gvr: &GroupVersionResource, namespace: Option<&str>, opts: ListOptions) -> impl Stream<Item=T, Error=Error> + Send
-        where L: List<T> + DeserializeOwned + Send + 'static, T: Send + 'static
+    pub fn iter<L, T>(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        opts: ListOptions,
+    ) -> impl Stream<Item = T, Error = Error> + Send
+    where
+        L: List<T> + DeserializeOwned + Send + 'static,
+        T: Send + 'static,
     {
         let url = self.url(gvr, namespace, None, opts.clone());
 
@@ -356,22 +427,21 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                         .uri(hyper_uri(url.clone()))
                         .body(Body::empty())
                         .map_err(|e| e.into());
-                    let res = do_request(Arc::clone(&client), req)
-                        .and_then(move |list: L| {
-                            let next = {
-                                let meta = list.listmeta();
-                                match meta.continu {
-                                    Some(ref continu) => {
-                                        opts.continu = continu.clone();
-                                        let query = serde_urlencoded::to_string(&opts)?;
-                                        url.set_query(Some(&query));
-                                        Some((url, opts))
-                                    },
-                                    None => None,
+                    let res = do_request(Arc::clone(&client), req).and_then(move |list: L| {
+                        let next = {
+                            let meta = list.listmeta();
+                            match meta.continu {
+                                Some(ref continu) => {
+                                    opts.continu = continu.clone();
+                                    let query = serde_urlencoded::to_string(&opts)?;
+                                    url.set_query(Some(&query));
+                                    Some((url, opts))
                                 }
-                            };
-                            Ok((list, next))
-                        });
+                                None => None,
+                            }
+                        };
+                        Ok((list, next))
+                    });
                     Some(res)
                 })
             })
@@ -392,27 +462,58 @@ fn test_url() {
     let http = hyper::client::HttpConnector::new(1);
     let client = Client::new_from_context(http, context).unwrap();
 
-    let url = client.url(
-        &GroupVersionResource{group: "", version: "v1", resource: "pods"},
-        Some("myns"),
-        Some("myname"),
-        GetOptions::default(),
-    ).unwrap();
-    assert_eq!(url.to_string(), "https://192.168.42.147:8443/api/v1/namespaces/myns/pods/myname");
+    let url = client
+        .url(
+            &GroupVersionResource {
+                group: "",
+                version: "v1",
+                resource: "pods",
+            },
+            Some("myns"),
+            Some("myname"),
+            GetOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        url.to_string(),
+        "https://192.168.42.147:8443/api/v1/namespaces/myns/pods/myname"
+    );
 
-    let url = client.url(
-        &GroupVersionResource{group: "rbac.authorization.k8s.io", version: "v1beta1", resource: "clusterroles"},
-        None,
-        Some("myrole"),
-        GetOptions{pretty: true, ..Default::default()},
-    ).unwrap();
+    let url = client
+        .url(
+            &GroupVersionResource {
+                group: "rbac.authorization.k8s.io",
+                version: "v1beta1",
+                resource: "clusterroles",
+            },
+            None,
+            Some("myrole"),
+            GetOptions {
+                pretty: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
     assert_eq!(url.to_string(), "https://192.168.42.147:8443/apis/rbac.authorization.k8s.io/v1beta1/clusterroles/myrole?pretty=true");
 
-    let url = client.url(
-        &GroupVersionResource{group: "", version: "v1", resource: "namespaces"},
-        None,
-        None,
-        ListOptions{resource_version: "abcdef".into(), limit: 27, ..Default::default()},
-    ).unwrap();
-    assert_eq!(url.to_string(), "https://192.168.42.147:8443/api/v1/namespaces?resourceVersion=abcdef&limit=27");
+    let url = client
+        .url(
+            &GroupVersionResource {
+                group: "",
+                version: "v1",
+                resource: "namespaces",
+            },
+            None,
+            None,
+            ListOptions {
+                resource_version: "abcdef".into(),
+                limit: 27,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        url.to_string(),
+        "https://192.168.42.147:8443/api/v1/namespaces?resourceVersion=abcdef&limit=27"
+    );
 }
