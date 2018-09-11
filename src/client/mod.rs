@@ -20,8 +20,9 @@ pub mod config;
 mod resplit;
 
 use self::config::ConfigContext;
-use super::api::meta::v1::{Status, WatchEvent};
-use super::{GroupVersionResource, List, Metadata};
+use super::api::meta::v1::{ItemList, Status, WatchEvent};
+use super::api::TypeMeta;
+use super::{GroupVersionResource, Metadata};
 
 #[derive(Fail, Debug)]
 #[fail(display = "HTTP client error: {}", err)]
@@ -406,15 +407,14 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn iter<L, T>(
+    pub fn iter<T>(
         &self,
         gvr: &GroupVersionResource,
         namespace: Option<&str>,
         opts: ListOptions,
     ) -> impl Stream<Item = T, Error = Error> + Send
     where
-        L: List<T> + DeserializeOwned + Send + 'static,
-        T: Send + 'static,
+        T: TypeMeta + DeserializeOwned + Default + Send + 'static,
     {
         let url = self.url(gvr, namespace, None, opts.clone());
 
@@ -427,10 +427,9 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                         .uri(hyper_uri(url.clone()))
                         .body(Body::empty())
                         .map_err(|e| e.into());
-                    let res = do_request(Arc::clone(&client), req).and_then(move |list: L| {
-                        let next = {
-                            let meta = list.listmeta();
-                            match meta.continu {
+                    let res =
+                        do_request(Arc::clone(&client), req).and_then(move |list: ItemList<T>| {
+                            let next = match list.metadata.continu {
                                 Some(ref continu) => {
                                     opts.continu = continu.clone();
                                     let query = serde_urlencoded::to_string(&opts)?;
@@ -438,10 +437,9 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                                     Some((url, opts))
                                 }
                                 None => None,
-                            }
-                        };
-                        Ok((list, next))
-                    });
+                            };
+                            Ok((list, next))
+                        });
                     Some(res)
                 })
             })
@@ -450,7 +448,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         future::result(url)
             .and_then(move |url| future::ok(fetch_pages(url)))
             .flatten_stream()
-            .map(|page| stream::iter_ok(page.into_items().into_iter()))
+            .map(|page| stream::iter_ok(page.items.into_iter()))
             .flatten()
     }
 }
