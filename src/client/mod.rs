@@ -20,7 +20,7 @@ pub mod config;
 mod resplit;
 
 use self::config::ConfigContext;
-use super::api::meta::v1::{GetOptions, ItemList, ListOptions, Status, WatchEvent};
+use super::api::meta::v1::{DeleteOptions, GetOptions, ItemList, ListOptions, Status, WatchEvent};
 use super::api::TypeMeta;
 use super::{GroupVersionResource, Metadata};
 
@@ -293,7 +293,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn put<T>(
+    pub fn create<T>(
         &self,
         gvr: &GroupVersionResource,
         value: &T,
@@ -321,6 +321,94 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                 .body(Body::from(json))
                 .map_err(|e| e.into())
         }();
+        do_request(Arc::clone(&self.client), req)
+    }
+
+    pub fn update<T>(
+        &self,
+        gvr: &GroupVersionResource,
+        value: &T,
+    ) -> impl Future<Item = T, Error = Error> + Send
+    where
+        T: Metadata + Serialize + DeserializeOwned + Send + 'static,
+    {
+        let req = || -> Result<_, Error> {
+            let metadata = value.metadata();
+            let namespace = &metadata.namespace; // NB: assumes input object is correctly qualified
+            let name = metadata.name.as_ref().ok_or(required_attr("name"))?;
+
+            let json = serde_json::to_vec(value)?;
+
+            Request::builder()
+                .method(Method::PUT)
+                .uri(hyper_uri(self.url(
+                    gvr,
+                    namespace.as_ref().map(|v| v.as_str()),
+                    Some(&name),
+                    (),
+                )?))
+                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                .body(Body::from(json))
+                .map_err(|e| e.into())
+        }();
+        do_request(Arc::clone(&self.client), req)
+    }
+
+    pub fn patch<T, U>(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        name: &str,
+        patch_type: &str,
+        value: &T,
+    ) -> impl Future<Item = U, Error = Error> + Send
+    where
+        T: Serialize,
+        U: DeserializeOwned + Send + 'static,
+    {
+        let req = || -> Result<_, Error> {
+            let json = serde_json::to_vec(value)?;
+
+            Request::builder()
+                .method(Method::PATCH)
+                .uri(hyper_uri(self.url(gvr, namespace, Some(name), ())?))
+                .header(CONTENT_TYPE, patch_type)
+                .body(Body::from(json))
+                .map_err(|e| e.into())
+        }();
+        do_request(Arc::clone(&self.client), req)
+    }
+
+    pub fn delete(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        name: &str,
+        opts: DeleteOptions,
+    ) -> impl Future<Item = (), Error = Error> + Send {
+        let req = self.url(gvr, namespace, Some(name), opts).and_then(|url| {
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(hyper_uri(url))
+                .body(Body::empty())
+                .map_err(|e| e.into())
+        });
+        do_request(Arc::clone(&self.client), req)
+    }
+
+    pub fn delete_collection(
+        &self,
+        gvr: &GroupVersionResource,
+        namespace: Option<&str>,
+        opts: ListOptions,
+    ) -> impl Future<Item = (), Error = Error> + Send {
+        let req = self.url(gvr, namespace, None, opts).and_then(|url| {
+            Request::builder()
+                .method(Method::DELETE)
+                .uri(hyper_uri(url))
+                .body(Body::empty())
+                .map_err(|e| e.into())
+        });
         do_request(Arc::clone(&self.client), req)
     }
 
