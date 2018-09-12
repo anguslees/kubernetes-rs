@@ -18,6 +18,10 @@ pub use self::intstr::IntOrString;
 // TODO: implement this with some appropriate Rust type.
 pub type Quantity = String;
 
+pub const JSON_PATCH: &'static str = "application/json-patch+json";
+pub const MERGE_PATCH: &'static str = "application/merge-patch+json";
+pub const STRATEGIC_MERGE_PATCH: &'static str = "application/strategic-merge-patch+json";
+
 pub trait TypeMeta {
     fn api_version() -> &'static str;
     fn kind() -> &'static str;
