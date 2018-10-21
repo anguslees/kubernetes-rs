@@ -268,8 +268,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                     None
                 };
                 url.set_query(q)
-            })
-            .with_context(|e| format!("Unable to encode URL parameters {}", e))?;
+            }).with_context(|e| format!("Unable to encode URL parameters {}", e))?;
         Ok(url)
     }
 
@@ -316,8 +315,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                     namespace.as_ref().map(|v| v.as_str()),
                     Some(&name),
                     opts,
-                )?))
-                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                )?)).header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                 .body(Body::from(json))
                 .map_err(|e| e.into())
         }();
@@ -346,8 +344,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                     namespace.as_ref().map(|v| v.as_str()),
                     Some(&name),
                     (),
-                )?))
-                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                )?)).header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                 .body(Body::from(json))
                 .map_err(|e| e.into())
         }();
@@ -529,8 +526,7 @@ fn test_url() {
             Some("myns"),
             Some("myname"),
             GetOptions::default(),
-        )
-        .unwrap();
+        ).unwrap();
     assert_eq!(
         url.to_string(),
         "https://192.168.42.147:8443/api/v1/namespaces/myns/pods/myname"
@@ -549,8 +545,7 @@ fn test_url() {
                 pretty: true,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        ).unwrap();
     assert_eq!(url.to_string(), "https://192.168.42.147:8443/apis/rbac.authorization.k8s.io/v1beta1/clusterroles/myrole?pretty=true");
 
     let url = client
@@ -567,8 +562,7 @@ fn test_url() {
                 limit: 27,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        ).unwrap();
     assert_eq!(
         url.to_string(),
         "https://192.168.42.147:8443/api/v1/namespaces?resourceVersion=abcdef&limit=27"
