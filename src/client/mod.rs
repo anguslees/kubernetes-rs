@@ -97,7 +97,11 @@ impl Client<HttpsConnector<hyper::client::HttpConnector>> {
             tls.add_root_certificate(cert);
         }
 
-        // FIXME: config.cluster.insecure_skip_tls_verify
+        if config.cluster.insecure_skip_tls_verify {
+            debug!("Disabling CA verification");
+            // TODO: do this only for the endpoint in question, not globally.
+            tls.danger_accept_invalid_certs(true);
+        }
 
         let hyper_client =
             hyper::Client::builder().build(HttpsConnector::from((http, tls.build()?)));
