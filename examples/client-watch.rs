@@ -79,8 +79,7 @@ fn main_() -> Result<(), Error> {
         .list(&pods, namespace, Default::default())
         .inspect(|podlist: &PodList| {
             podlist.items.iter().for_each(print_pod_state);
-        })
-        .and_then(move |podlist: PodList| {
+        }).and_then(move |podlist: PodList| {
             debug!(
                 "Starting at resource version {}",
                 podlist.metadata.resource_version
