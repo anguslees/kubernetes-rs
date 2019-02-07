@@ -2,7 +2,7 @@ extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
-extern crate kubernetes;
+extern crate kubernetes_holding;
 extern crate log;
 extern crate pretty_env_logger;
 extern crate serde_json;
@@ -13,10 +13,10 @@ use futures::prelude::*;
 use std::result::Result;
 use tokio::runtime::current_thread;
 
-use kubernetes::api;
-use kubernetes::api::core::v1::Pod;
-use kubernetes::api::meta::v1::ListOptions;
-use kubernetes::client::Client;
+use kubernetes_holding::api;
+use kubernetes_holding::api::core::v1::Pod;
+use kubernetes_holding::api::meta::v1::ListOptions;
+use kubernetes_holding::client::Client;
 
 fn main_() -> Result<(), Error> {
     let client = Client::new()?;

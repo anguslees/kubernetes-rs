@@ -1,8 +1,8 @@
 [package]
-name = "kubernetes"
+name = "kubernetes_holding"
 version = "0.2.0"
 authors = ["Angus Lees <gus@inodes.org>"]
-description = "A Kubernetes client library for Rust"
+description = "Code that is being moved to better homes"
 repository = "https://github.com/anguslees/kubernetes-rs"
 readme = "README.md"
 keywords = ["kubernetes"]
@@ -13,18 +13,24 @@ license = "Apache-2.0"
 maintenance = {status = "actively-developed,experimental"}
 
 [dependencies]
-kubernetes_client = { path= "client" }
-kubernetes_holding = { path= "holding" }
-kubernetes_proxy = { path= "proxy" }
-
-
-[dev_dependencies]
-
-failure = "0.1.1"
-futures = "0.1.21"
+dirs = "1.0"
+url = "1.6"
 hyper = "0.12"
 hyper-tls = "0.3"
-log = "0.4"
-pretty_env_logger = "0.2"
+native-tls = "0.2"
+serde = "1.0"
+serde_derive = "1.0"
 serde_json = "1.0"
+serde_yaml = "0.7"
+serde_urlencoded = "0.5"
+futures = "0.1.21"
 tokio = "0.1.7"
+tokio-core = "0.1.17"
+failure = "0.1.1"
+base64 = "0.9"
+log = "0.4"
+openssl = "0.10"
+
+[dev-dependencies]
+pretty_env_logger = "0.2"
+serde_test = "1.0"
