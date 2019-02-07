@@ -2,7 +2,7 @@ extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
-extern crate kubernetes;
+extern crate kubernetes_holding;
 extern crate serde_json;
 #[macro_use]
 extern crate log;
@@ -13,10 +13,10 @@ use futures::prelude::*;
 use hyper::rt;
 use std::result::Result;
 
-use kubernetes::api;
-use kubernetes::api::core::v1::{ContainerState, Pod, PodList};
-use kubernetes::api::meta::v1::{EventType, ListOptions};
-use kubernetes::client::Client;
+use kubernetes_holding::api;
+use kubernetes_holding::api::core::v1::{ContainerState, Pod, PodList};
+use kubernetes_holding::api::meta::v1::{EventType, ListOptions};
+use kubernetes_holding::client::Client;
 
 fn print_pod_state(p: &Pod) {
     println!(
@@ -79,7 +79,8 @@ fn main_() -> Result<(), Error> {
         .list(&pods, namespace, Default::default())
         .inspect(|podlist: &PodList| {
             podlist.items.iter().for_each(print_pod_state);
-        }).and_then(move |podlist: PodList| {
+        })
+        .and_then(move |podlist: PodList| {
             debug!(
                 "Starting at resource version {}",
                 podlist.metadata.resource_version
