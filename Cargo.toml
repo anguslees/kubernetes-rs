@@ -12,14 +12,22 @@ license = "Apache-2.0"
 [badges]
 maintenance = {status = "actively-developed,experimental"}
 
+[workspace]
+members = [
+   "client",
+   "api",
+   "proxy",
+   "holding",
+]
+
+
 [dependencies]
-kubernetes_client = { path= "client" }
-kubernetes_holding = { path= "holding" }
-kubernetes_proxy = { path= "proxy" }
+kubernetes_api = { path = "api" }
+kubernetes_client = { path = "client" }
+kubernetes_holding = { path = "holding" }
+kubernetes_proxy = { path = "proxy" }
 
-
-[dev_dependencies]
-
+[dev-dependencies]
 failure = "0.1.1"
 futures = "0.1.21"
 hyper = "0.12"

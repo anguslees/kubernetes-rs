@@ -2,6 +2,7 @@ extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
+extern crate kubernetes_api;
 extern crate kubernetes_holding;
 extern crate serde_json;
 #[macro_use]
@@ -13,9 +14,8 @@ use futures::prelude::*;
 use hyper::rt;
 use std::result::Result;
 
-use kubernetes_holding::api;
-use kubernetes_holding::api::core::v1::{ContainerState, Pod, PodList};
-use kubernetes_holding::api::meta::v1::{EventType, ListOptions};
+use kubernetes_api::core::v1::{ContainerState, Pod, PodList, PodPhase};
+use kubernetes_api::meta::v1::{EventType, ListOptions};
 use kubernetes_holding::client::Client;
 
 fn print_pod_state(p: &Pod) {
@@ -26,7 +26,7 @@ fn print_pod_state(p: &Pod) {
             .as_ref()
             .map(String::as_str)
             .unwrap_or("(no name)"),
-        p.status.phase.unwrap_or(api::core::v1::PodPhase::Unknown)
+        p.status.phase.unwrap_or(PodPhase::Unknown)
     );
     let c_statuses = p
         .status
@@ -72,7 +72,7 @@ fn print_pod_state(p: &Pod) {
 fn main_() -> Result<(), Error> {
     let client = Client::new()?;
 
-    let pods = api::core::v1::GROUP_VERSION.with_resource("pods");
+    let pods = kubernetes_api::core::v1::GROUP_VERSION.with_resource("pods");
     let namespace = Some("kube-system");
 
     let work = client

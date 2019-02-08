@@ -1,3 +1,13 @@
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+#[cfg_attr(test, macro_use)]
+extern crate serde_json;
+#[macro_use]
+extern crate failure;
+#[cfg(test)]
+extern crate serde_yaml;
+
 use serde::de::{self, Deserialize, Deserializer, Unexpected};
 use serde::ser::{Serialize, Serializer};
 use std::borrow::Cow;
@@ -8,6 +18,7 @@ pub mod apps;
 pub mod core;
 mod intstr;
 pub mod meta;
+pub mod unstructured;
 
 pub type Time = String;
 pub type Integer = i32;
@@ -30,21 +41,21 @@ pub trait TypeMeta {
 /// Zero-sized struct that serializes to/from apiVersion/kind struct
 /// based on type parameter.
 #[derive(Default, Debug, Clone)]
-pub struct TypeMetaStruct<T>(PhantomData<T>);
+pub struct TypeMetaImpl<T>(PhantomData<T>);
 
-impl<T: TypeMeta> ::serde::de::Expected for TypeMetaStruct<T> {
+impl<T: TypeMeta> ::serde::de::Expected for TypeMetaImpl<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(formatter, "{}/{}", T::api_version(), T::kind())
     }
 }
 
-impl<T> PartialEq for TypeMetaStruct<T> {
+impl<T> PartialEq for TypeMetaImpl<T> {
     fn eq(&self, _rhs: &Self) -> bool {
         true
     }
 }
 
-/// Like TypeMetaStruct, but contains non-constant apiVersion/kind.
+/// Like TypeMetaImpl, but contains non-constant apiVersion/kind.
 #[derive(Serialize, Deserialize)]
 #[serde(rename = "TypeMeta", rename_all = "camelCase")]
 struct TypeMetaRuntime<'a> {
@@ -54,7 +65,7 @@ struct TypeMetaRuntime<'a> {
     kind: Option<Cow<'a, str>>,
 }
 
-impl<T: TypeMeta> Serialize for TypeMetaStruct<T> {
+impl<T: TypeMeta> Serialize for TypeMetaImpl<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -67,13 +78,13 @@ impl<T: TypeMeta> Serialize for TypeMetaStruct<T> {
     }
 }
 
-impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaStruct<T> {
+impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaImpl<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let t = TypeMetaRuntime::deserialize(deserializer)?;
-        let ret = TypeMetaStruct(PhantomData);
+        let ret = TypeMetaImpl(PhantomData);
         match (t.api_version, t.kind) {
             (Some(a), Some(k)) => {
                 if a == T::api_version() && k == T::kind() {
@@ -113,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_typemeta_serde() {
-        let t: TypeMetaStruct<TestType> = TypeMetaStruct(PhantomData);
+        let t: TypeMetaImpl<TestType> = TypeMetaImpl(PhantomData);
 
         assert_tokens(
             &t,
@@ -165,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_typemeta_serde_error() {
-        assert_de_tokens_error::<TypeMetaStruct<TestType>>(
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
             &[
                 Token::Struct {
                     name: "TypeMeta",
@@ -179,7 +190,7 @@ mod tests {
             "missing field `apiVersion`",
         );
 
-        assert_de_tokens_error::<TypeMetaStruct<TestType>>(
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
             &[
                 Token::Struct {
                     name: "TypeMeta",
@@ -193,7 +204,7 @@ mod tests {
             "missing field `kind`",
         );
 
-        assert_de_tokens_error::<TypeMetaStruct<TestType>>(
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
             &[
                 Token::Struct {
                     name: "TypeMeta",
@@ -208,7 +219,7 @@ mod tests {
             "duplicate field `apiVersion`",
         );
 
-        assert_de_tokens_error::<TypeMetaStruct<TestType>>(
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
             &[
                 Token::Struct {
                     name: "TypeMeta",

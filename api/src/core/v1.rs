@@ -1,9 +1,11 @@
-use api::meta::v1::{ItemList, LabelSelector, ObjectMeta};
-use api::{IntOrString, Integer, Quantity, Time, TypeMeta, TypeMetaStruct};
+use crate::meta::v1::{ItemList, LabelSelector, Metadata, ObjectMeta};
+use crate::meta::GroupVersion;
+use crate::{IntOrString, Integer, Quantity, Time, TypeMeta, TypeMetaImpl};
 use serde_json::{self, Map, Value};
 use std::borrow::Cow;
 use std::default::Default;
-use {GroupVersion, Metadata};
+
+// TODO(gus): Uses of serde_json::{Map,Value} below are probably incorrect.
 
 const API_GROUP: &str = "v1";
 pub const GROUP_VERSION: GroupVersion = GroupVersion {
@@ -15,7 +17,7 @@ pub const GROUP_VERSION: GroupVersion = GroupVersion {
 #[serde(rename_all = "camelCase")]
 pub struct Pod {
     #[serde(flatten)]
-    typemeta: TypeMetaStruct<Pod>,
+    typemeta: TypeMetaImpl<Pod>,
     #[serde(default)]
     pub metadata: ObjectMeta,
     #[serde(default)]
