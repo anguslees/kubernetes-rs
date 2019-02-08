@@ -46,6 +46,91 @@ impl NamespacedResource for Pods {
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct Namespace {
+    #[serde(flatten)]
+    typemeta: TypeMetaImpl<Pod>,
+    #[serde(default)]
+    pub metadata: ObjectMeta,
+    #[serde(default)]
+    pub spec: NamespaceSpec,
+    #[serde(default)]
+    pub status: NamespaceStatus,
+}
+
+impl NamespacedResource for Namespace {
+    type List = NamespaceList;
+
+    fn namespaced(&self) -> bool {
+        false
+    }
+
+    fn gvr(&self) -> GroupVersionResource {
+        GroupVersionResource {
+            group: "",
+            version: "v1",
+            resource: "namespaces",
+        }
+    }
+}
+
+impl Resource for Namespace {
+    type List = NamespaceList;
+
+    fn gvr(&self) -> GroupVersionResource {
+        GroupVersionResource {
+            group: "",
+            version: "v1",
+            resource: "namespaces",
+        }
+    }
+}
+
+pub type NamespaceList = ItemList<Namespace>;
+
+impl TypeMeta for Namespace {
+    fn api_version() -> &'static str {
+        API_GROUP
+    }
+    fn kind() -> &'static str {
+        "Namespace"
+    }
+}
+
+impl Metadata for Namespace {
+    fn api_version(&self) -> &str {
+        <Namespace as TypeMeta>::api_version()
+    }
+    fn kind(&self) -> &str {
+        <Namespace as TypeMeta>::kind()
+    }
+    fn metadata(&self) -> Cow<ObjectMeta> {
+        Cow::Borrowed(&self.metadata)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NamespaceSpec {
+    #[serde(default)]
+    pub finalizers: Vec<String>,
+}
+
+const FINALIZER_KUBERNETES: &str = "kubernetes";
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NamespaceStatus {
+    pub phase: Option<NamespacePhase>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum NamespacePhase {
+    Active,
+    Terminating,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Pod {
     #[serde(flatten)]
     typemeta: TypeMetaImpl<Pod>,
