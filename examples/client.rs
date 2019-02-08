@@ -2,6 +2,7 @@ extern crate failure;
 extern crate futures;
 extern crate hyper;
 extern crate hyper_tls;
+extern crate kubernetes_api;
 extern crate kubernetes_holding;
 extern crate log;
 extern crate pretty_env_logger;
@@ -13,15 +14,14 @@ use futures::prelude::*;
 use std::result::Result;
 use tokio::runtime::current_thread;
 
-use kubernetes_holding::api;
-use kubernetes_holding::api::core::v1::Pod;
-use kubernetes_holding::api::meta::v1::ListOptions;
+use kubernetes_api::core::v1::Pod;
+use kubernetes_api::meta::v1::ListOptions;
 use kubernetes_holding::client::Client;
 
 fn main_() -> Result<(), Error> {
     let client = Client::new()?;
 
-    let pods = api::core::v1::GROUP_VERSION.with_resource("pods");
+    let pods = kubernetes_api::core::v1::GROUP_VERSION.with_resource("pods");
     let namespace = Some("kube-system");
 
     // Artificially low `limit`, to demonstrate pagination

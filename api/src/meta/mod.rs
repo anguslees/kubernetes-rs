@@ -2,7 +2,7 @@ use std::convert::From;
 use std::fmt;
 use std::result::Result;
 
-use super::Metadata;
+pub mod v1;
 
 // GroupVersionKind unambiguously identifies a kind.
 #[derive(Debug, Clone, PartialEq)]
@@ -14,7 +14,7 @@ pub struct GroupVersionKind<'a> {
 
 impl<'a> GroupVersionKind<'a> {
     // TODO: should be TryFrom, once that stabilises
-    pub fn from_object<T: Metadata>(m: &'a T) -> Result<Self, InvalidGroupVersionError> {
+    pub fn from_object<T: v1::Metadata>(m: &'a T) -> Result<Self, InvalidGroupVersionError> {
         let gv = GroupVersion::from_str(m.api_version())?;
         Ok(gv.with_kind(m.kind()))
     }

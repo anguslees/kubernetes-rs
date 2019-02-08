@@ -1,8 +1,6 @@
-use api::meta::v1::{ListMeta, ObjectMeta};
+use crate::meta::v1::{List, ListMeta, Metadata, ObjectMeta};
 use serde_json::{self, Value};
 use std::borrow::Cow;
-
-use super::{List, Metadata};
 
 impl Metadata for Value {
     fn kind(&self) -> &str {

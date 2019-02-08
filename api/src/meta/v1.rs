@@ -1,11 +1,11 @@
-use api::{Integer, Time, TypeMeta, TypeMetaStruct};
+use crate::{Integer, Time, TypeMeta, TypeMetaImpl};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
+use std::slice;
 use std::sync::Once;
-use List;
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -277,7 +277,7 @@ where
     T: TypeMeta,
 {
     #[serde(flatten)]
-    typemeta: TypeMetaStruct<ItemList<T>>,
+    typemeta: TypeMetaImpl<ItemList<T>>,
     pub metadata: ListMeta,
     #[serde(default)]
     pub items: Vec<T>,
@@ -387,4 +387,75 @@ pub struct ListOptions {
     pub limit: u32,
     #[serde(skip_serializing_if = "is_default", rename = "continue")]
     pub continu: String, // Vec<u8>
+}
+
+pub trait Metadata {
+    fn api_version(&self) -> &str;
+    fn kind(&self) -> &str;
+    fn metadata(&self) -> Cow<ObjectMeta>;
+}
+
+pub trait List<T> {
+    fn listmeta(&self) -> Cow<ListMeta>;
+    fn items(&self) -> &[T];
+    fn items_mut(&mut self) -> &mut [T];
+    fn into_items(self) -> Vec<T>;
+}
+
+impl<'a, T> IntoIterator for &'a List<T> {
+    type Item = &'a T;
+    type IntoIter = slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items().into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut List<T> {
+    type Item = &'a mut T;
+    type IntoIter = slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items_mut().iter_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Metadata;
+    use serde_json::{self, Value};
+
+    fn pod_json() -> Value {
+        json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "pod-example",
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "busybox",
+                        "command": ["echo"],
+                        "args": ["Hello world"],
+                    },
+                ],
+            },
+        })
+    }
+
+    #[test]
+    fn untyped() {
+        let j = pod_json();
+        assert_eq!(j.kind(), "Pod");
+        assert_eq!(j.api_version(), "v1");
+        assert_eq!(j.metadata().name.as_ref().unwrap(), "pod-example");
+    }
+
+    #[test]
+    fn typed() {
+        use crate::core::v1::Pod;
+        let pod: Pod = serde_json::from_value(pod_json()).unwrap();
+        assert_eq!(pod.spec.containers[0].image, Some("busybox".into()));
+    }
 }

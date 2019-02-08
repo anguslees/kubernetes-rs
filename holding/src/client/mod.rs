@@ -1,3 +1,8 @@
+use api::meta::v1::{
+    DeleteOptions, GetOptions, ItemList, ListOptions, Metadata, Status, WatchEvent,
+};
+use api::meta::GroupVersionResource;
+use api::TypeMeta;
 use failure::{Error, ResultExt};
 use futures::{future, stream, Future, Stream};
 use hyper::header::{HeaderValue, CONTENT_TYPE};
@@ -20,9 +25,6 @@ pub mod config;
 mod resplit;
 
 use self::config::ConfigContext;
-use super::api::meta::v1::{DeleteOptions, GetOptions, ItemList, ListOptions, Status, WatchEvent};
-use super::api::TypeMeta;
-use super::{GroupVersionResource, Metadata};
 
 #[derive(Fail, Debug)]
 #[fail(display = "HTTP client error: {}", err)]
@@ -149,18 +151,23 @@ where
         //.inspect(|res| debug!("Response: {:#?}", res))
         .and_then(|res| {
             let status = res.status();
-            res.into_body().concat2().map(move |body| (status, body)).from_err()
+            res.into_body()
+                .concat2()
+                .map(move |body| (status, body))
+                .from_err()
         })
         // Verbose!
         //.inspect(|(_, body)| debug!("Response body: {:?}", ::std::str::from_utf8(body.as_ref())))
         .and_then(move |(httpstatus, body)| -> Result<T, Error> {
             if !httpstatus.is_success() {
                 debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
-                let status: Status = serde_json::from_slice(body.as_ref())
-                    .map_err(|e| {
-                        debug!("Failed to parse error Status ({}), falling back to HTTP status", e);
-                        HttpStatusError{status: httpstatus}
-                    })?;
+                let status: Status = serde_json::from_slice(body.as_ref()).map_err(|e| {
+                    debug!(
+                        "Failed to parse error Status ({}), falling back to HTTP status",
+                        e
+                    );
+                    HttpStatusError { status: httpstatus }
+                })?;
                 Err(status.into())
             } else {
                 let o = serde_json::from_slice(body.as_ref())
@@ -272,7 +279,8 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                     None
                 };
                 url.set_query(q)
-            }).with_context(|e| format!("Unable to encode URL parameters {}", e))?;
+            })
+            .with_context(|e| format!("Unable to encode URL parameters {}", e))?;
         Ok(url)
     }
 
@@ -319,7 +327,8 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                     namespace.as_ref().map(|v| v.as_str()),
                     Some(&name),
                     opts,
-                )?)).header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                )?))
+                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                 .body(Body::from(json))
                 .map_err(|e| e.into())
         }();
@@ -348,7 +357,8 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                     namespace.as_ref().map(|v| v.as_str()),
                     Some(&name),
                     (),
-                )?)).header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                )?))
+                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                 .body(Body::from(json))
                 .map_err(|e| e.into())
         }();
@@ -530,7 +540,8 @@ fn test_url() {
             Some("myns"),
             Some("myname"),
             GetOptions::default(),
-        ).unwrap();
+        )
+        .unwrap();
     assert_eq!(
         url.to_string(),
         "https://192.168.42.147:8443/api/v1/namespaces/myns/pods/myname"
@@ -549,7 +560,8 @@ fn test_url() {
                 pretty: true,
                 ..Default::default()
             },
-        ).unwrap();
+        )
+        .unwrap();
     assert_eq!(url.to_string(), "https://192.168.42.147:8443/apis/rbac.authorization.k8s.io/v1beta1/clusterroles/myrole?pretty=true");
 
     let url = client
@@ -566,7 +578,8 @@ fn test_url() {
                 limit: 27,
                 ..Default::default()
             },
-        ).unwrap();
+        )
+        .unwrap();
     assert_eq!(
         url.to_string(),
         "https://192.168.42.147:8443/api/v1/namespaces?resourceVersion=abcdef&limit=27"
