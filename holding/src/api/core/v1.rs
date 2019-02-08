@@ -747,9 +747,10 @@ pub struct PodStatus {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum PodConditionType {
+    ContainersReady,
+    Initialized,
     PodScheduled,
     Ready,
-    Initialized,
     Unschedulable,
 }
 
