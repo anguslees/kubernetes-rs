@@ -1,6 +1,5 @@
-use api::meta::v1::{
-    DeleteOptions, GetOptions, ItemList, ListOptions, Metadata, Status, WatchEvent,
-};
+use api::core::v1::{NamespacedResource, Resource};
+use api::meta::v1::{DeleteOptions, GetOptions, List, ListOptions, Metadata, Status, WatchEvent};
 use api::meta::GroupVersionResource;
 use api::TypeMeta;
 use failure::{Error, ResultExt};
@@ -51,6 +50,21 @@ pub fn required_attr(attr: &'static str) -> RequiredAttributeError {
 pub struct Client<C> {
     client: Arc<hyper::Client<C>>,
     config: ConfigContext,
+}
+
+#[derive(Debug, Clone)]
+pub struct NamespacedClient<'a, C> {
+    namespace: &'a str,
+    client: &'a Client<C>,
+}
+
+impl<'a, C> Client<C> {
+    pub fn namespace(&'a self, ns: &'a str) -> NamespacedClient<'a, C> {
+        NamespacedClient {
+            namespace: ns,
+            client: self,
+        }
+    }
 }
 
 impl Client<HttpsConnector<hyper::client::HttpConnector>> {
@@ -233,6 +247,34 @@ where
                 })
         })
         .flatten_stream()
+}
+
+impl<'a, C: hyper::client::connect::Connect + 'static> NamespacedClient<'a, C> {
+    pub fn iter<T>(
+        &self,
+        rsrc: T,
+    ) -> impl Stream<Item = <T::List as List>::Item, Error = Error> + Send
+    where
+        T: NamespacedResource,
+        T::List: List + DeserializeOwned + Send + 'static,
+        <T::List as List>::Item: TypeMeta + DeserializeOwned + Default + Send + 'static,
+    {
+        self.iter_opt(rsrc, Default::default())
+    }
+
+    pub fn iter_opt<T>(
+        &self,
+        rsrc: T,
+        opts: ListOptions,
+    ) -> impl Stream<Item = <T::List as List>::Item, Error = Error> + Send
+    where
+        T: NamespacedResource,
+        T::List: List + DeserializeOwned + Send + 'static,
+        <T::List as List>::Item: TypeMeta + DeserializeOwned + Default + Send + 'static,
+    {
+        self.client
+            ._do_iter::<T::List>(rsrc.gvr(), Some(self.namespace), opts)
+    }
 }
 
 impl<C: hyper::client::connect::Connect + 'static> Client<C> {
@@ -479,14 +521,40 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
 
     pub fn iter<T>(
         &self,
-        gvr: &GroupVersionResource,
+        rsrc: T,
+    ) -> impl Stream<Item = <T::List as List>::Item, Error = Error> + Send
+    where
+        T: Resource,
+        T::List: List + DeserializeOwned + Send + 'static,
+        <T::List as List>::Item: TypeMeta + DeserializeOwned + Default + Send + 'static,
+    {
+        self.iter_opt(rsrc, Default::default())
+    }
+
+    pub fn iter_opt<T>(
+        &self,
+        rsrc: T,
+        opts: ListOptions,
+    ) -> impl Stream<Item = <T::List as List>::Item, Error = Error> + Send
+    where
+        T: Resource,
+        T::List: List + DeserializeOwned + Send + 'static,
+        <T::List as List>::Item: TypeMeta + DeserializeOwned + Default + Send + 'static,
+    {
+        self._do_iter::<T::List>(rsrc.gvr(), None, opts)
+    }
+
+    fn _do_iter<L>(
+        &self,
+        gvr: GroupVersionResource,
         namespace: Option<&str>,
         opts: ListOptions,
-    ) -> impl Stream<Item = T, Error = Error> + Send
+    ) -> impl Stream<Item = L::Item, Error = Error> + Send
     where
-        T: TypeMeta + DeserializeOwned + Default + Send + 'static,
+        L: List + DeserializeOwned + Send + 'static,
+        L::Item: TypeMeta + DeserializeOwned + Default + Send + 'static,
     {
-        let url = self.url(gvr, namespace, None, opts.clone());
+        let url = self.url(&gvr, namespace, None, opts.clone());
 
         let client = Arc::clone(&self.client);
         let fetch_pages = move |url: Url| {
@@ -497,19 +565,18 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
                         .uri(hyper_uri(url.clone()))
                         .body(Body::empty())
                         .map_err(|e| e.into());
-                    let res =
-                        do_request(Arc::clone(&client), req).and_then(move |list: ItemList<T>| {
-                            let next = match list.metadata.continu {
-                                Some(ref continu) => {
-                                    opts.continu = continu.clone();
-                                    let query = serde_urlencoded::to_string(&opts)?;
-                                    url.set_query(Some(&query));
-                                    Some((url, opts))
-                                }
-                                None => None,
-                            };
-                            Ok((list, next))
-                        });
+                    let res = do_request(Arc::clone(&client), req).and_then(move |list: L| {
+                        let next = match list.listmeta().continu {
+                            Some(ref continu) => {
+                                opts.continu = continu.clone();
+                                let query = serde_urlencoded::to_string(&opts)?;
+                                url.set_query(Some(&query));
+                                Some((url, opts))
+                            }
+                            None => None,
+                        };
+                        Ok((list, next))
+                    });
                     Some(res)
                 })
             })
@@ -518,7 +585,7 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         future::result(url)
             .and_then(move |url| future::ok(fetch_pages(url)))
             .flatten_stream()
-            .map(|page| stream::iter_ok(page.items.into_iter()))
+            .map(|page| stream::iter_ok(page.into_items().into_iter()))
             .flatten()
     }
 }

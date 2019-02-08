@@ -16,7 +16,9 @@ impl Metadata for Value {
     }
 }
 
-impl List<Value> for Value {
+impl List for Value {
+    type Item = Value;
+
     fn listmeta(&self) -> Cow<ListMeta> {
         serde_json::from_value(self["metadata"].clone()).unwrap_or_default()
     }

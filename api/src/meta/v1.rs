@@ -307,20 +307,22 @@ where
     }
 }
 
-impl<T> List<T> for ItemList<T>
+impl<T> List for ItemList<T>
 where
     T: TypeMeta,
 {
+    type Item = T;
+
     fn listmeta(&self) -> Cow<ListMeta> {
         Cow::Borrowed(&self.metadata)
     }
-    fn items(&self) -> &[T] {
+    fn items(&self) -> &[Self::Item] {
         &self.items
     }
-    fn items_mut(&mut self) -> &mut [T] {
+    fn items_mut(&mut self) -> &mut [Self::Item] {
         &mut self.items
     }
-    fn into_items(self) -> Vec<T> {
+    fn into_items(self) -> Vec<Self::Item> {
         self.items
     }
 }
@@ -395,14 +397,15 @@ pub trait Metadata {
     fn metadata(&self) -> Cow<ObjectMeta>;
 }
 
-pub trait List<T> {
+pub trait List {
+    type Item;
     fn listmeta(&self) -> Cow<ListMeta>;
-    fn items(&self) -> &[T];
-    fn items_mut(&mut self) -> &mut [T];
-    fn into_items(self) -> Vec<T>;
+    fn items(&self) -> &[Self::Item];
+    fn items_mut(&mut self) -> &mut [Self::Item];
+    fn into_items(self) -> Vec<Self::Item>;
 }
 
-impl<'a, T> IntoIterator for &'a List<T> {
+impl<'a, T> IntoIterator for &'a List<Item = T> {
     type Item = &'a T;
     type IntoIter = slice::Iter<'a, T>;
 
@@ -411,7 +414,7 @@ impl<'a, T> IntoIterator for &'a List<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a mut List<T> {
+impl<'a, T> IntoIterator for &'a mut List<Item = T> {
     type Item = &'a mut T;
     type IntoIter = slice::IterMut<'a, T>;
 
