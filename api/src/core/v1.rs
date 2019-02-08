@@ -1,5 +1,5 @@
-use crate::meta::v1::{ItemList, LabelSelector, Metadata, ObjectMeta};
-use crate::meta::GroupVersion;
+use crate::meta::v1::{ItemList, LabelSelector, List, Metadata, ObjectMeta};
+use crate::meta::{GroupVersion, GroupVersionResource};
 use crate::{IntOrString, Integer, Quantity, Time, TypeMeta, TypeMetaImpl};
 use serde_json::{self, Map, Value};
 use std::borrow::Cow;
@@ -12,6 +12,32 @@ pub const GROUP_VERSION: GroupVersion = GroupVersion {
     group: "",
     version: "v1",
 };
+
+pub struct Pods;
+
+pub trait NamespacedResource {
+    type List: List;
+
+    fn gvr(&self) -> GroupVersionResource;
+}
+
+pub trait Resource {
+    type List: List;
+
+    fn gvr(&self) -> GroupVersionResource;
+}
+
+impl NamespacedResource for Pods {
+    type List = PodList;
+
+    fn gvr(&self) -> GroupVersionResource {
+        GroupVersionResource {
+            group: "",
+            version: "v1",
+            resource: "pods",
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
