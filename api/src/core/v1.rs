@@ -19,6 +19,7 @@ pub trait NamespacedResource {
     type List: List;
 
     fn gvr(&self) -> GroupVersionResource;
+    fn namespaced(&self) -> bool;
 }
 
 pub trait Resource {
@@ -29,6 +30,10 @@ pub trait Resource {
 
 impl NamespacedResource for Pods {
     type List = PodList;
+
+    fn namespaced(&self) -> bool {
+        true
+    }
 
     fn gvr(&self) -> GroupVersionResource {
         GroupVersionResource {

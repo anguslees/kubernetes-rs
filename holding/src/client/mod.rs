@@ -272,8 +272,12 @@ impl<'a, C: hyper::client::connect::Connect + 'static> NamespacedClient<'a, C> {
         T::List: List + DeserializeOwned + Send + 'static,
         <T::List as List>::Item: TypeMeta + DeserializeOwned + Default + Send + 'static,
     {
-        self.client
-            ._do_iter::<T::List>(rsrc.gvr(), Some(self.namespace), opts)
+        let ns = if rsrc.namespaced() {
+            Some(self.namespace)
+        } else {
+            None
+        };
+        self.client._do_iter::<T::List>(rsrc.gvr(), ns, opts)
     }
 }
 
