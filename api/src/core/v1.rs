@@ -282,7 +282,10 @@ pub struct NodeSelector {
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeSelectorTerm {
+    #[serde(default)]
     pub match_expressions: Vec<NodeSelectorRequirement>,
+    #[serde(default)]
+    pub match_fields: Vec<NodeSelectorRequirement>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
