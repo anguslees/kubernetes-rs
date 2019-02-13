@@ -19,36 +19,17 @@ use serde_urlencoded;
 use url::Url;
 
 use api::core::v1::{NamespacedResource, Resource};
-use api::meta::v1::{DeleteOptions, GetOptions, List, ListOptions, Metadata, Status, WatchEvent};
+use api::meta::v1::{
+    DeleteOptions, GetOptions, List, ListOptions, Metadata, ObjectMeta, Status, WatchEvent,
+};
 use api::meta::GroupVersionResource;
 use api::TypeMeta;
-use k8sclient::error::ClientError as NewClientError;
+use k8sclient::error::ClientError;
 
 pub mod config;
 mod resplit;
 
 use self::config::ConfigContext;
-
-#[derive(Fail, Debug)]
-#[fail(display = "HTTP client error: {}", err)]
-pub struct ClientError {
-    err: hyper::Error,
-}
-
-#[derive(Fail, Debug)]
-#[fail(display = "Unexpected HTTP response status: {}", status)]
-pub struct HttpStatusError {
-    status: hyper::StatusCode,
-}
-
-#[derive(Fail, Debug)]
-#[fail(display = "Attribute {} required but not provided", attr)]
-pub struct RequiredAttributeError {
-    attr: &'static str,
-}
-pub fn required_attr(attr: &'static str) -> RequiredAttributeError {
-    RequiredAttributeError { attr: attr }
-}
 
 #[derive(Debug, Clone)]
 pub struct Client<C> {
@@ -181,14 +162,14 @@ where
                 let status: Status = serde_json::from_slice(body.as_ref()).map_err(|e| {
                     debug!(
                         "Failed to parse error Status ({}), falling back to HTTP status",
-                        NewClientError::new_decode_error("error Status", &e, body.to_vec())
+                        ClientError::new_decode_error("error Status", &e, body.to_vec())
                     );
-                    HttpStatusError { status: httpstatus }
+                    ClientError::HttpStatusError { status: httpstatus }
                 })?;
                 Err(status.into())
             } else {
                 let o = serde_json::from_slice(body.as_ref()).with_context(|e| {
-                    NewClientError::new_decode_error("response body", e, body.to_vec())
+                    ClientError::new_decode_error("response body", e, body.to_vec())
                 })?;
                 Ok(o)
             }
@@ -226,8 +207,8 @@ where
                             let status: Status = serde_json::from_slice(body.as_ref()).map_err(
                                 |e| {
                                     debug!("Failed to parse error Status ({}), falling back to HTTP status", 
-                                        NewClientError::new_decode_error("error Status", &e, body.to_vec()));
-                                    HttpStatusError { status: httpstatus }
+                                        ClientError::new_decode_error("error Status", &e, body.to_vec()));
+                                    ClientError::HttpStatusError { status: httpstatus }
                                 },
                             )?;
 
@@ -245,12 +226,19 @@ where
                         })
                         .and_then(move |line| {
                             let o: T = serde_json::from_slice(line.as_ref())
-                                .with_context(|e| NewClientError::new_decode_error("watch line", e, line.to_vec()))?;
+                                .with_context(|e| ClientError::new_decode_error("watch line", e, line.to_vec()))?;
                             Ok(o)
                         })
                 })
         })
         .flatten_stream()
+}
+
+fn require_name(metadata: &ObjectMeta) -> Result<&String, ClientError> {
+    metadata
+        .name
+        .as_ref()
+        .ok_or_else(|| ClientError::RequiredAttributeError { attr: "name" })
 }
 
 impl<'a, C: hyper::client::connect::Connect + 'static> NamespacedClient<'a, C> {
@@ -365,8 +353,9 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
     {
         let req = || -> Result<_, Error> {
             let metadata = value.metadata();
-            let namespace = &metadata.namespace; // NB: assumes input object is correctly qualified
-            let name = metadata.name.as_ref().ok_or(required_attr("name"))?;
+            // NB: assumes input object is correctly qualified
+            let namespace = &metadata.namespace;
+            let name = require_name(&metadata)?;
 
             let json = serde_json::to_vec(value)?;
 
@@ -395,8 +384,9 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
     {
         let req = || -> Result<_, Error> {
             let metadata = value.metadata();
-            let namespace = &metadata.namespace; // NB: assumes input object is correctly qualified
-            let name = metadata.name.as_ref().ok_or(required_attr("name"))?;
+            // NB: assumes input object is correctly qualified
+            let namespace = &metadata.namespace;
+            let name = require_name(&metadata)?;
 
             let json = serde_json::to_vec(value)?;
 
