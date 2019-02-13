@@ -2,6 +2,16 @@
 
 [crates.io]: https://crates.io/crates/kubernetes
 
+## Structure
+
+* `/api` API domain objects and supporting infrastructure. 
+  These model the k8s API and permit modelling unknown objects via 
+  `unstructured` as well as facilitating the explicit modelling of CRD types.
+* `/holding` proof of concept code we haven't found a home for.
+* `/client` code related to using the API as a consumer.
+* `/proxy` to become an (explicit-where-known + unstructured passthrough where
+   not) k8s proxy.
+
 ## Status
 
 *Experimental.*
