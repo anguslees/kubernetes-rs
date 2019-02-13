@@ -1,7 +1,10 @@
-use api::core::v1::{NamespacedResource, Resource};
-use api::meta::v1::{DeleteOptions, GetOptions, List, ListOptions, Metadata, Status, WatchEvent};
-use api::meta::GroupVersionResource;
-use api::TypeMeta;
+use std::default::Default;
+use std::env;
+use std::fmt;
+use std::path::PathBuf;
+use std::str;
+use std::sync::Arc;
+
 use failure::{Error, ResultExt};
 use futures::{future, stream, Future, Stream};
 use hyper::header::{HeaderValue, CONTENT_TYPE};
@@ -13,13 +16,13 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json;
 use serde_urlencoded;
-use std::default::Default;
-use std::env;
-use std::fmt;
-use std::path::PathBuf;
-use std::str;
-use std::sync::Arc;
 use url::Url;
+
+use api::core::v1::{NamespacedResource, Resource};
+use api::meta::v1::{DeleteOptions, GetOptions, List, ListOptions, Metadata, Status, WatchEvent};
+use api::meta::GroupVersionResource;
+use api::TypeMeta;
+use k8sclient::error::ClientError as NewClientError;
 
 pub mod config;
 mod resplit;
@@ -175,72 +178,21 @@ where
         //.inspect(|(_, body)| debug!("Response body: {:?}", ::std::str::from_utf8(body.as_ref())))
         .and_then(move |(httpstatus, body)| -> Result<T, Error> {
             if !httpstatus.is_success() {
-                // I think we can drop this debug! it is redundant with enrich_error.
-                debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
                 let status: Status = serde_json::from_slice(body.as_ref()).map_err(|e| {
                     debug!(
                         "Failed to parse error Status ({}), falling back to HTTP status",
-                        enrich_error("error Status", &e, body.as_ref())
+                        NewClientError::new_decode_error("error Status", &e, body.to_vec())
                     );
                     HttpStatusError { status: httpstatus }
                 })?;
                 Err(status.into())
             } else {
-                let o = serde_json::from_slice(body.as_ref())
-                    .with_context(|e| enrich_error("response body", e, body.as_ref()))?;
+                let o = serde_json::from_slice(body.as_ref()).with_context(|e| {
+                    NewClientError::new_decode_error("response body", e, body.to_vec())
+                })?;
                 Ok(o)
             }
         })
-}
-
-/// Grabs the 1K preceeding text from the failed document and describes the error.
-///
-/// TODO: handle multi-line JSON, just in case some API server decides to start emitting that.
-fn enrich_error(desc: &str, e: &serde_json::Error, body_ref: &[u8]) -> String {
-    // debug! so that operators running with debug logs get *everything*
-    debug!("Parse failure: {:#?}", body_ref);
-    // Provide a short snippet for errors that may be handled, logged at higher verbosity etc.
-    match e.classify() {
-        serde_json::error::Category::Io | serde_json::error::Category::Eof => {
-            format!("Unable to parse {}: {}", desc, e)
-        }
-        _ => {
-            // Either bad structure/values in the JSON (so show it) or bad contents (so show it)
-            // TODO: discard leading content? e.g. smaller but still debuggable?
-            let mut lines = str::from_utf8(body_ref).unwrap().lines();
-            let mut line_n = 1;
-            let mut line = lines.next().unwrap();
-            while line_n < e.line() {
-                line_n += 1;
-                line = lines.next().unwrap();
-            }
-            let start_n = if e.column() < 1024 {
-                0
-            } else {
-                e.column() - 1024
-            };
-            let body_snippet = &line[start_n..e.column()];
-            format!("Unable to parse {}: {} {}", desc, body_snippet, e)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
-    #[serde(rename_all = "camelCase")]
-    struct SampleObject {
-        pub required_field: String,
-    }
-
-    #[test]
-    fn test_enrich_error_short() {
-        let doc = "{\"doc\": 1}";
-        let formatted = serde_json::from_slice::<SampleObject>(doc.as_bytes())
-            .err()
-            .map(|e| super::enrich_error("error Status", &e, doc.as_bytes()));
-        assert_eq!(Some(String::from("Unable to parse error Status: {\"doc\": 1} missing field `requiredField` at line 1 column 10")), formatted);
-    }
 }
 
 fn do_watch<C, T>(
@@ -271,12 +223,10 @@ where
                         .concat2()
                         .from_err::<Error>()
                         .and_then(move |body| {
-                            // Redundant debug with enrich_error
-                            debug!("failure body: {:#?}", ::std::str::from_utf8(body.as_ref()));
                             let status: Status = serde_json::from_slice(body.as_ref()).map_err(
                                 |e| {
                                     debug!("Failed to parse error Status ({}), falling back to HTTP status", 
-                                        enrich_error("error Status", &e, body.as_ref()));
+                                        NewClientError::new_decode_error("error Status", &e, body.to_vec()));
                                     HttpStatusError { status: httpstatus }
                                 },
                             )?;
@@ -295,7 +245,7 @@ where
                         })
                         .and_then(move |line| {
                             let o: T = serde_json::from_slice(line.as_ref())
-                                .with_context(|e| enrich_error("watch line", e, line.as_ref()))?;
+                                .with_context(|e| NewClientError::new_decode_error("watch line", e, line.to_vec()))?;
                             Ok(o)
                         })
                 })
