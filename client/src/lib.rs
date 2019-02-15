@@ -4,6 +4,7 @@ extern crate failure;
 extern crate log;
 extern crate serde_json;
 
+extern crate hyper;
 #[cfg(test)]
 extern crate serde;
 #[cfg(test)]
