@@ -8,6 +8,7 @@ readme = "README.md"
 keywords = ["kubernetes"]
 categories = ["api-bindings"]
 license = "Apache-2.0"
+edition = "2018"
 
 [badges]
 maintenance = {status = "actively-developed,experimental"}
@@ -20,7 +21,6 @@ members = [
    "holding",
 ]
 
-
 [dependencies]
 kubernetes_api = { path = "api" }
 kubernetes_client = { path = "client" }
@@ -28,11 +28,15 @@ kubernetes_holding = { path = "holding" }
 kubernetes_proxy = { path = "proxy" }
 
 [dev-dependencies]
+base64 = "^0.10"
 failure = "0.1"
 futures = "0.1.21"
+har = "0.2"
 hyper = "0.12"
 hyper-tls = "0.3"
 log = "0.4"
 pretty_env_logger = "0.3"
 serde_json = "1.0"
 tokio = "0.1.7"
+pest = "^2.0"
+pest_derive = "^2.0"
