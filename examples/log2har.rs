@@ -110,6 +110,7 @@ fn parse_log(input: &str) -> Result<String, Error> {
     // the iterator must succeed given the definition of file - otherwise parse fails.
     let log = LogParser::parse(Rule::file, &input)?.next().unwrap();
     let mut result = String::new();
+    let mut entries: Vec<v1_3::Entries> = Vec::new();
     for record in log.into_inner() {
         match record.as_rule() {
             Rule::log_entry => {
@@ -216,12 +217,26 @@ fn parse_log(input: &str) -> Result<String, Error> {
                         e => Err(format_err!("Unexpected parse rule 2 encountered {:?}", e))?,
                     }
                 }
-                result.push_str(&format!("{}\n", serde_json::to_string_pretty(&entry)?));
+                entries.push(entry);
             }
             Rule::EOI => (),
             e => Err(format_err!("Unexpected parse rule 1 encountered {:?}", e))?,
         }
     }
+    let har_log = har::Har {
+        log: har::Spec::V1_3(v1_3::Log {
+            browser: None,
+            creator: v1_3::Creator {
+                name: "kubernetes-rs".to_string(),
+                version: "0".to_string(),
+                comment: None,
+            },
+            pages: None,
+            entries: entries,
+            comment: None,
+        }),
+    };
+    result.push_str(&format!("{}\n", serde_json::to_string_pretty(&har_log)?));
     Ok(result)
 }
 
@@ -300,62 +315,75 @@ I0225 20:16:03.147299   14148 request.go:942] Response Body: {
 }
 "#;
         let expected = r#"{
-  "pageref": null,
-  "startedDateTime": "",
-  "time": 0,
-  "request": {
-    "method": "GET",
-    "url": "https://localhost:6445/version?timeout=32s",
-    "httpVersion": "unknown",
-    "cookies": [],
-    "headers": [
-      {
-        "name": "Accept",
-        "value": "application/json, */*"
-      },
-      {
-        "name": "User-Agent",
-        "value": "kubectl/v1.13.0 (windows/amd64) kubernetes/ddf47ac"
-      }
-    ],
-    "queryString": [],
-    "headersSize": -1,
-    "bodySize": -1
-  },
-  "response": {
-    "status": -1,
-    "statusText": "",
-    "httpVersion": "unknown",
-    "cookies": [],
-    "headers": [
-      {
-        "name": "Content-Type",
-        "value": "application/json"
-      },
-      {
-        "name": "Content-Length",
-        "value": "263"
-      },
-      {
-        "name": "Date",
-        "value": "Thu, 21 Feb 2019 21:04:01 GMT"
-      }
-    ],
-    "content": {
-      "size": -1,
-      "mimeType": "",
-      "text": "ewogICJtYWpvciI6ICIxIiwKICAibWlub3IiOiAiMTMiLAogICJnaXRWZXJzaW9uIjogInYxLjEzLjAiLAogICJnaXRDb21taXQiOiAiZGRmNDdhYzEzYzFhOTQ4M2VhMDM1YTc5Y2Q3YzEwMDA1ZmYyMWE2ZCIsCiAgImdpdFRyZWVTdGF0ZSI6ICJjbGVhbiIsCiAgImJ1aWxkRGF0ZSI6ICIyMDE4LTEyLTAzVDIwOjU2OjEyWiIsCiAgImdvVmVyc2lvbiI6ICJnbzEuMTEuMiIsCiAgImNvbXBpbGVyIjogImdjIiwKICAicGxhdGZvcm0iOiAibGludXgvYW1kNjQiCn0K",
-      "encoding": "base64"
+  "log": {
+    "version": "1.3",
+    "creator": {
+      "name": "kubernetes-rs",
+      "version": "0"
     },
-    "redirectURL": "",
-    "headersSize": -1,
-    "bodySize": -1
-  },
-  "cache": {},
-  "timings": {
-    "send": -1,
-    "wait": -1,
-    "receive": -1
+    "browser": null,
+    "pages": null,
+    "entries": [
+      {
+        "pageref": null,
+        "startedDateTime": "",
+        "time": 0,
+        "request": {
+          "method": "GET",
+          "url": "https://localhost:6445/version?timeout=32s",
+          "httpVersion": "unknown",
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "application/json, */*"
+            },
+            {
+              "name": "User-Agent",
+              "value": "kubectl/v1.13.0 (windows/amd64) kubernetes/ddf47ac"
+            }
+          ],
+          "queryString": [],
+          "headersSize": -1,
+          "bodySize": -1
+        },
+        "response": {
+          "status": -1,
+          "statusText": "",
+          "httpVersion": "unknown",
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Length",
+              "value": "263"
+            },
+            {
+              "name": "Date",
+              "value": "Thu, 21 Feb 2019 21:04:01 GMT"
+            }
+          ],
+          "content": {
+            "size": -1,
+            "mimeType": "",
+            "text": "ewogICJtYWpvciI6ICIxIiwKICAibWlub3IiOiAiMTMiLAogICJnaXRWZXJzaW9uIjogInYxLjEzLjAiLAogICJnaXRDb21taXQiOiAiZGRmNDdhYzEzYzFhOTQ4M2VhMDM1YTc5Y2Q3YzEwMDA1ZmYyMWE2ZCIsCiAgImdpdFRyZWVTdGF0ZSI6ICJjbGVhbiIsCiAgImJ1aWxkRGF0ZSI6ICIyMDE4LTEyLTAzVDIwOjU2OjEyWiIsCiAgImdvVmVyc2lvbiI6ICJnbzEuMTEuMiIsCiAgImNvbXBpbGVyIjogImdjIiwKICAicGxhdGZvcm0iOiAibGludXgvYW1kNjQiCn0K",
+            "encoding": "base64"
+          },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": -1
+        },
+        "cache": {},
+        "timings": {
+          "send": -1,
+          "wait": -1,
+          "receive": -1
+        }
+      }
+    ]
   }
 }
 "#;
@@ -384,62 +412,75 @@ I0219 14:38:39.153335   13292 request.go:942] Response Body: {
 }
 "#;
         let expected = r#"{
-  "pageref": null,
-  "startedDateTime": "",
-  "time": 0,
-  "request": {
-    "method": "GET",
-    "url": "https://localhost:6445/api/v1/namespaces?limit=500",
-    "httpVersion": "unknown",
-    "cookies": [],
-    "headers": [
-      {
-        "name": "User-Agent",
-        "value": "kubectl/v1.13.0 (windows/amd64) kubernetes/ddf47ac"
-      },
-      {
-        "name": "Accept",
-        "value": "application/json;as=Table;v=v1beta1;g=meta.k8s.io, application/json"
-      }
-    ],
-    "queryString": [],
-    "headersSize": -1,
-    "bodySize": -1
-  },
-  "response": {
-    "status": -1,
-    "statusText": "",
-    "httpVersion": "unknown",
-    "cookies": [],
-    "headers": [
-      {
-        "name": "Content-Type",
-        "value": "application/json"
-      },
-      {
-        "name": "Content-Length",
-        "value": "263"
-      },
-      {
-        "name": "Date",
-        "value": "Sun, 17 Feb 2019 15:21:36 GMT"
-      }
-    ],
-    "content": {
-      "size": -1,
-      "mimeType": "",
-      "text": "ewogICJtYWpvciI6ICIxIiwKICAibWlub3IiOiAiMTMiLAogICJnaXRWZXJzaW9uIjogInYxLjEzLjAiLAogICJnaXRDb21taXQiOiAiZGRmNDdhYzEzYzFhOTQ4M2VhMDM1YTc5Y2Q3YzEwMDA1ZmYyMWE2ZCIsCiAgImdpdFRyZWVTdGF0ZSI6ICJjbGVhbiIsCiAgImJ1aWxkRGF0ZSI6ICIyMDE4LTEyLTAzVDIwOjU2OjEyWiIsCiAgImdvVmVyc2lvbiI6ICJnbzEuMTEuMiIsCiAgImNvbXBpbGVyIjogImdjIiwKICAicGxhdGZvcm0iOiAibGludXgvYW1kNjQiCn0K",
-      "encoding": "base64"
+  "log": {
+    "version": "1.3",
+    "creator": {
+      "name": "kubernetes-rs",
+      "version": "0"
     },
-    "redirectURL": "",
-    "headersSize": -1,
-    "bodySize": -1
-  },
-  "cache": {},
-  "timings": {
-    "send": -1,
-    "wait": -1,
-    "receive": -1
+    "browser": null,
+    "pages": null,
+    "entries": [
+      {
+        "pageref": null,
+        "startedDateTime": "",
+        "time": 0,
+        "request": {
+          "method": "GET",
+          "url": "https://localhost:6445/api/v1/namespaces?limit=500",
+          "httpVersion": "unknown",
+          "cookies": [],
+          "headers": [
+            {
+              "name": "User-Agent",
+              "value": "kubectl/v1.13.0 (windows/amd64) kubernetes/ddf47ac"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json;as=Table;v=v1beta1;g=meta.k8s.io, application/json"
+            }
+          ],
+          "queryString": [],
+          "headersSize": -1,
+          "bodySize": -1
+        },
+        "response": {
+          "status": -1,
+          "statusText": "",
+          "httpVersion": "unknown",
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Length",
+              "value": "263"
+            },
+            {
+              "name": "Date",
+              "value": "Sun, 17 Feb 2019 15:21:36 GMT"
+            }
+          ],
+          "content": {
+            "size": -1,
+            "mimeType": "",
+            "text": "ewogICJtYWpvciI6ICIxIiwKICAibWlub3IiOiAiMTMiLAogICJnaXRWZXJzaW9uIjogInYxLjEzLjAiLAogICJnaXRDb21taXQiOiAiZGRmNDdhYzEzYzFhOTQ4M2VhMDM1YTc5Y2Q3YzEwMDA1ZmYyMWE2ZCIsCiAgImdpdFRyZWVTdGF0ZSI6ICJjbGVhbiIsCiAgImJ1aWxkRGF0ZSI6ICIyMDE4LTEyLTAzVDIwOjU2OjEyWiIsCiAgImdvVmVyc2lvbiI6ICJnbzEuMTEuMiIsCiAgImNvbXBpbGVyIjogImdjIiwKICAicGxhdGZvcm0iOiAibGludXgvYW1kNjQiCn0K",
+            "encoding": "base64"
+          },
+          "redirectURL": "",
+          "headersSize": -1,
+          "bodySize": -1
+        },
+        "cache": {},
+        "timings": {
+          "send": -1,
+          "wait": -1,
+          "receive": -1
+        }
+      }
+    ]
   }
 }
 "#;
