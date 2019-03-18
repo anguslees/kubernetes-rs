@@ -48,7 +48,7 @@ impl NamespacedResource for Pods {
 #[serde(rename_all = "camelCase")]
 pub struct Namespace {
     #[serde(flatten)]
-    typemeta: TypeMetaImpl<Pod>,
+    typemeta: TypeMetaImpl<Namespace>,
     #[serde(default)]
     pub metadata: ObjectMeta,
     #[serde(default)]
