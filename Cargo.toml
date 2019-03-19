@@ -28,6 +28,7 @@ kubernetes_holding = { path = "holding" }
 kubernetes_proxy = { path = "proxy" }
 
 [dev-dependencies]
+assert-json-diff = "^1"
 base64 = "^0.10"
 failure = "0.1"
 futures = "0.1.21"
