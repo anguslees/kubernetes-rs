@@ -52,23 +52,21 @@ fn test_namespace_har() -> Result<(), Error> {
         println!("list {:?}", typed);
         println!("list-to-json {}", serde_json::to_string_pretty(&typed)?);
         // reserialise the response to JSON, bounce it back through Value to eliminate the *ordering* in the output imposed by the use of structured types.
-        let typed_json = serde_json::to_string_pretty(&serde_json::from_str::<Value>(
-            &serde_json::to_string_pretty(&typed)?,
-        )?)?;
+        let from_typed = serde_json::from_str::<Value>(&serde_json::to_string_pretty(&typed)?)?;
+        let typed_json = serde_json::to_string_pretty(&from_typed)?;
         // let typed_interim: Value = serde_json::from_str(&typed_j)
         // compare the resulting JSON
         // canonicalise the reference JSON to avoid over-time library output variations.
-        let interim: Value = serde_json::from_str(&response_str)?;
-        let canonical = serde_json::to_string_pretty(&interim)?;
-        println!("{}", canonical);
-        println!("{}", typed_json);
+        let reference: Value = serde_json::from_str(&response_str)?;
+        let canonical = serde_json::to_string_pretty(&reference)?;
+        println!("canonical {}", canonical);
+        println!("typed {}", typed_json);
         // XXX: should be eq, but need to:
         // - fix Pods kind in output
         // - remove extra apiVersion and kind etc
         // - implement omitEmpty
-        // XXX or alternatively have a different round trip verification approach
-        assert_ne!(canonical, typed_json);
-        // compare equal.
+        // Until then, we permit arbitrary additional output in the type-round-tripped content.
+        assert_json_include!(actual: from_typed, expected: reference);
     }
     Ok(())
 }
