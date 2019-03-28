@@ -1,4 +1,6 @@
-use crate::{Integer, Time, TypeMeta, TypeMetaImpl};
+use crate::meta::{Integer, Time, TypeMeta, TypeMetaImpl};
+use crate::response::DecodeError;
+use failure::{Error, ResultExt};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -6,6 +8,8 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::slice;
 use std::sync::Once;
+
+const API_GROUP: &str = "v1";
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -60,8 +64,8 @@ pub struct Initializer {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
-    //pub api_version: String,
-    //pub kind: String,
+    #[serde(flatten)]
+    typemeta: TypeMetaImpl<Status>,
     #[serde(default)]
     pub metadata: ListMeta,
     #[serde(default)]
@@ -70,6 +74,26 @@ pub struct Status {
     pub message: Option<String>,
     pub reason: Option<StatusReason>,
     pub status: Option<StatusStatus>,
+}
+
+impl TypeMeta for Status {
+    fn api_version() -> &'static str {
+        API_GROUP
+    }
+    fn kind() -> &'static str {
+        "Status"
+    }
+}
+
+impl Status {
+    pub fn from_vec(body: Vec<u8>) -> Result<Self, Error> {
+        serde_json::from_slice(&body)
+            .with_context(|e| {
+                debug!("Failed to parse error Status ({})", e);
+                DecodeError::new(e, body)
+            })
+            .map_err(|e| e.into())
+    }
 }
 
 impl StdError for Status {
@@ -299,7 +323,7 @@ where
         // first call at runtime.  TODO: Re-evaluate once constant
         // functions are a thing.
         static mut KIND: Option<String> = None;
-        static INIT: Once = ::std::sync::ONCE_INIT;
+        static INIT: Once = Once::new();
         let k: &Option<String> = unsafe {
             INIT.call_once(|| {
                 KIND = Some(format!("{}List", T::kind()));

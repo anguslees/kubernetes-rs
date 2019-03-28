@@ -13,7 +13,7 @@ license = "Apache-2.0"
 maintenance = {status = "actively-developed,experimental"}
 
 [dependencies]
-kubernetes_holding = {path="../holding"}
+kubernetes_client = {path="../client"}
 
 [dev-dependencies]
 pretty_env_logger = "0.2"

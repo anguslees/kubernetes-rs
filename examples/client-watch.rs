@@ -1,23 +1,18 @@
 #![warn(unused_extern_crates)]
 
-extern crate failure;
-extern crate futures;
-extern crate hyper;
-extern crate kubernetes_api;
-extern crate kubernetes_apimachinery;
-extern crate kubernetes_holding;
 #[macro_use]
 extern crate log;
-extern crate pretty_env_logger;
-
 use failure::Error;
-use futures::prelude::*;
+use futures::future::Future;
+use futures::stream::Stream;
 use hyper::rt;
-use std::result::Result;
-
+use kubernetes_api::core::v1::Pods;
 use kubernetes_api::core::v1::{ContainerState, Pod, PodList, PodPhase};
 use kubernetes_apimachinery::meta::v1::{ListOptions, WatchEvent};
-use kubernetes_holding::client::Client;
+use kubernetes_apimachinery::meta::NamespaceScope;
+use kubernetes_client::Client;
+use pretty_env_logger;
+use std::result::Result;
 
 fn print_pod_state(p: &Pod) {
     println!(
@@ -73,41 +68,49 @@ fn print_pod_state(p: &Pod) {
 fn main_() -> Result<(), Error> {
     let client = Client::new()?;
 
-    let pods = kubernetes_api::core::v1::GROUP_VERSION.with_resource("pods");
-    let namespace = Some("kube-system");
+    let name = NamespaceScope::Namespace("kube-system".to_string());
 
-    let work = client
-        .list(&pods, namespace, Default::default())
+    let list = client
+        .resource(Pods)
+        .list(
+            &name,
+            ListOptions {
+                limit: 500,
+                ..Default::default()
+            },
+        )
         .inspect(|podlist: &PodList| {
             podlist.items.iter().for_each(print_pod_state);
-        })
-        .and_then(move |podlist: PodList| {
-            debug!(
-                "Starting at resource version {}",
-                podlist.metadata.resource_version
-            );
-
-            let listopts = ListOptions {
-                resource_version: podlist.metadata.resource_version,
-                ..Default::default()
-            };
-            client
-                .watch_list(&pods, namespace, listopts)
-                .for_each(|event| {
-                    match event {
-                        WatchEvent::Added(p) | WatchEvent::Modified(p) => {
-                            print_pod_state(&p);
-                        }
-                        WatchEvent::Deleted(p) => {
-                            println!("deleted {}", p.metadata.name.unwrap_or("(no name)".into()));
-                        }
-                        WatchEvent::Error(status) => debug!("Ignoring error event {:#?}", status),
-                    }
-                    Ok(())
-                })
         });
 
-    rt::run(work.map_err(|err| panic!("Error: {}", err)));
+    let watch = list.and_then(move |podlist: PodList| {
+        debug!(
+            "Starting at resource version {}",
+            podlist.metadata.resource_version
+        );
+
+        let listopts = ListOptions {
+            resource_version: podlist.metadata.resource_version,
+            ..Default::default()
+        };
+        client
+            .resource(Pods)
+            .watch(&name, listopts)
+            .for_each(|event| {
+                match event {
+                    WatchEvent::Added(p) | WatchEvent::Modified(p) => {
+                        print_pod_state(&p);
+                    }
+                    WatchEvent::Deleted(p) => {
+                        println!("deleted {}", p.metadata.name.unwrap_or("(no name)".into()));
+                    }
+                    WatchEvent::Error(status) => debug!("Ignoring error event {:#?}", status),
+                }
+                Ok(())
+            })
+    });
+
+    rt::run(watch.map_err(|err| panic!("Error: {}", err)));
 
     Ok(())
 }

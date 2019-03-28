@@ -1,4 +1,4 @@
-use serde_base64;
+use apimachinery::serde_base64;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

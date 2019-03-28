@@ -1,235 +1,158 @@
 #![warn(unused_extern_crates)]
+#![allow(bare_trait_objects)] // TODO as part of 2018 update
 
+extern crate base64;
 #[macro_use]
 extern crate failure;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate futures;
+extern crate http;
 #[cfg(test)]
 extern crate kubernetes_api as api;
+#[macro_use]
+extern crate log;
 #[cfg_attr(test, macro_use)]
 extern crate serde_json;
+extern crate serde_urlencoded;
 
-use serde::de::{self, Deserialize, Deserializer, Unexpected};
-use serde::ser::{Serialize, Serializer};
-use std::borrow::Cow;
-use std::fmt;
-use std::marker::PhantomData;
+use crate::request::Request;
+use crate::response::Response;
+use failure::Error;
+use futures::{Future, Sink, Stream};
+use serde::de::DeserializeOwned;
+use serde::ser::Serialize;
+use std::sync::Arc;
 
-mod intstr;
+pub mod client;
 pub mod meta;
+pub mod request;
+mod resplit;
+pub mod response;
+pub mod serde_base64;
 pub mod unstructured;
 
-pub type Time = String;
-pub type Integer = i32;
-pub use self::intstr::IntOrString;
+pub trait ApiService {
+    // TODO: add other methods like version, schema introspection, etc.
 
-// A fixed-point integer, serialised as a particular string format.
-// See k8s.io/apimachinery/pkg/api/resource/quantity.go
-// TODO: implement this with some appropriate Rust type.
-pub type Quantity = String;
-
-pub trait TypeMeta {
-    fn api_version() -> &'static str;
-    fn kind() -> &'static str;
-}
-
-/// Zero-sized struct that serializes to/from apiVersion/kind struct
-/// based on type parameter.
-#[derive(Default, Debug, Clone)]
-pub struct TypeMetaImpl<T>(PhantomData<T>);
-
-impl<T: TypeMeta> ::serde::de::Expected for TypeMetaImpl<T> {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "{}/{}", T::api_version(), T::kind())
-    }
-}
-
-impl<T> PartialEq for TypeMetaImpl<T> {
-    fn eq(&self, _rhs: &Self) -> bool {
-        true
-    }
-}
-
-/// Like TypeMetaImpl, but contains non-constant apiVersion/kind.
-#[derive(Serialize, Deserialize)]
-#[serde(rename = "TypeMeta", rename_all = "camelCase")]
-struct TypeMetaRuntime<'a> {
-    #[serde(borrow)]
-    api_version: Option<Cow<'a, str>>,
-    #[serde(borrow)]
-    kind: Option<Cow<'a, str>>,
-}
-
-impl<T: TypeMeta> Serialize for TypeMetaImpl<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn request<B, O, B2>(
+        &self,
+        req: Request<B, O>,
+    ) -> Box<Future<Item = Response<B2>, Error = Error> + Send>
     where
-        S: Serializer,
-    {
-        let tmp = TypeMetaRuntime {
-            api_version: Some(Cow::from(T::api_version())),
-            kind: Some(Cow::from(T::kind())),
-        };
-        tmp.serialize(serializer)
-    }
-}
+        B: Serialize + Send + 'static,
+        O: Serialize + Send + 'static,
+        B2: DeserializeOwned + Send + 'static;
 
-impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaImpl<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn watch<B, O, B2>(&self, req: Request<B, O>) -> Box<Stream<Item = B2, Error = Error> + Send>
     where
-        D: Deserializer<'de>,
-    {
-        let t = TypeMetaRuntime::deserialize(deserializer)?;
-        let ret = TypeMetaImpl(PhantomData);
-        match (t.api_version, t.kind) {
-            (Some(a), Some(k)) => {
-                if a == T::api_version() && k == T::kind() {
-                    Ok(ret)
-                } else {
-                    let found = format!("{}/{}", a, k);
-                    Err(de::Error::invalid_value(Unexpected::Other(&found), &ret))
-                }
-            }
+        B: Serialize + Send + 'static,
+        O: Serialize + Send + 'static,
+        B2: DeserializeOwned + Send + 'static;
+}
 
-            // No apiVersion/kind specified -> assume valid in context
-            (None, None) => Ok(ret),
+pub trait HttpService {
+    type Body: AsRef<[u8]> + IntoIterator<Item = u8>;
+    type Future: Future<Item = http::Response<Self::Body>, Error = Error> + Send;
+    type StreamFuture: Future<Item = http::Response<Self::Stream>, Error = Error> + Send;
+    type Stream: Stream<Item = Self::Body, Error = Error> + Send;
 
-            // Partially specified -> invalid
-            (Some(_), None) => Err(de::Error::missing_field("kind")),
-            (None, Some(_)) => Err(de::Error::missing_field("apiVersion")),
-        }
+    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future;
+
+    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture;
+}
+
+impl<T: ?Sized + HttpService> HttpService for Box<T> {
+    type Body = T::Body;
+    type Future = T::Future;
+    type StreamFuture = T::StreamFuture;
+    type Stream = T::Stream;
+
+    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
+        (**self).request(req)
+    }
+
+    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture {
+        (**self).watch(req)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    extern crate serde_test;
-    use self::serde_test::{assert_de_tokens, assert_de_tokens_error, assert_tokens, Token};
-    use super::*;
+impl<T: ?Sized + HttpService> HttpService for Arc<T> {
+    type Body = T::Body;
+    type Future = T::Future;
+    type StreamFuture = T::StreamFuture;
+    type Stream = T::Stream;
 
-    #[derive(Debug)]
-    struct TestType;
-    impl TypeMeta for TestType {
-        fn api_version() -> &'static str {
-            "v1alpha1"
-        }
-        fn kind() -> &'static str {
-            "Test"
-        }
+    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
+        (**self).request(req)
     }
 
-    #[test]
-    fn test_typemeta_serde() {
-        let t: TypeMetaImpl<TestType> = TypeMetaImpl(PhantomData);
+    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture {
+        (**self).watch(req)
+    }
+}
 
-        assert_tokens(
-            &t,
-            &[
-                Token::Struct {
-                    name: "TypeMeta",
-                    len: 2,
-                },
-                Token::Str("apiVersion"),
-                Token::Some,
-                Token::BorrowedStr("v1alpha1"),
-                Token::Str("kind"),
-                Token::Some,
-                Token::BorrowedStr("Test"),
-                Token::StructEnd,
-            ],
-        );
+impl<'a, T: ?Sized + HttpService> HttpService for &'a T {
+    type Body = T::Body;
+    type Future = T::Future;
+    type StreamFuture = T::StreamFuture;
+    type Stream = T::Stream;
 
-        // Reversed order of fields
-        assert_de_tokens(
-            &t,
-            &[
-                Token::Struct {
-                    name: "TypeMeta",
-                    len: 2,
-                },
-                Token::Str("kind"),
-                Token::Some,
-                Token::BorrowedStr("Test"),
-                Token::Str("apiVersion"),
-                Token::Some,
-                Token::BorrowedStr("v1alpha1"),
-                Token::StructEnd,
-            ],
-        );
-
-        // No apiVersion/kind is also ok
-        assert_de_tokens(
-            &t,
-            &[
-                Token::Struct {
-                    name: "TypeMeta",
-                    len: 0,
-                },
-                Token::StructEnd,
-            ],
-        );
+    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
+        (**self).request(req)
     }
 
-    #[test]
-    fn test_typemeta_serde_error() {
-        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
-            &[
-                Token::Struct {
-                    name: "TypeMeta",
-                    len: 1,
-                },
-                Token::Str("kind"),
-                Token::Some,
-                Token::BorrowedStr("TestType"),
-                Token::StructEnd,
-            ],
-            "missing field `apiVersion`",
-        );
+    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture {
+        (**self).watch(req)
+    }
+}
 
-        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
-            &[
-                Token::Struct {
-                    name: "TypeMeta",
-                    len: 1,
-                },
-                Token::Str("apiVersion"),
-                Token::Some,
-                Token::BorrowedStr("bogus"),
-                Token::StructEnd,
-            ],
-            "missing field `kind`",
-        );
+pub trait HttpUpgradeService {
+    // Ideally this trait would use AsyncRead+AsyncWrite, but that requires
+    // a dependency on tokio_io (just for those trait declarations).
+    // Take the easy/slow path for now and use Stream+Sink instead.
+    type Sink: Sink<SinkItem = Self::SinkItem, SinkError = Error> + Send;
+    type SinkItem: AsRef<[u8]>;
+    type Stream: Stream<Item = Self::StreamItem, Error = Error> + Send;
+    type StreamItem: AsRef<[u8]>;
+    type Future: Future<Item = (Self::Stream, Self::Sink), Error = Error> + Send;
 
-        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
-            &[
-                Token::Struct {
-                    name: "TypeMeta",
-                    len: 1,
-                },
-                Token::Str("apiVersion"),
-                Token::Some,
-                Token::Str("v1alpha1"),
-                Token::Str("apiVersion"),
-                Token::StructEnd,
-            ],
-            "duplicate field `apiVersion`",
-        );
+    fn upgrade(&self, req: http::Request<()>) -> Self::Future;
+}
 
-        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
-            &[
-                Token::Struct {
-                    name: "TypeMeta",
-                    len: 2,
-                },
-                Token::Str("kind"),
-                Token::Some,
-                Token::Str("NotTest"),
-                Token::Str("apiVersion"),
-                Token::Some,
-                Token::Str("v1alpha1"),
-                Token::StructEnd,
-            ],
-            "invalid value: v1alpha1/NotTest, expected v1alpha1/Test",
-        );
+impl<T: HttpUpgradeService> HttpUpgradeService for Arc<T> {
+    type Sink = T::Sink;
+    type SinkItem = T::SinkItem;
+    type Stream = T::Stream;
+    type StreamItem = T::StreamItem;
+    type Future = T::Future;
+
+    fn upgrade(&self, req: http::Request<()>) -> Self::Future {
+        (**self).upgrade(req)
+    }
+}
+
+impl<T: HttpUpgradeService> HttpUpgradeService for Box<T> {
+    type Sink = T::Sink;
+    type SinkItem = T::SinkItem;
+    type Stream = T::Stream;
+    type StreamItem = T::StreamItem;
+    type Future = T::Future;
+
+    fn upgrade(&self, req: http::Request<()>) -> Self::Future {
+        (**self).upgrade(req)
+    }
+}
+
+impl<'a, T: HttpUpgradeService> HttpUpgradeService for &'a T {
+    type Sink = T::Sink;
+    type SinkItem = T::SinkItem;
+    type Stream = T::Stream;
+    type StreamItem = T::StreamItem;
+    type Future = T::Future;
+
+    fn upgrade(&self, req: http::Request<()>) -> Self::Future {
+        (**self).upgrade(req)
     }
 }

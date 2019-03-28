@@ -1,6 +1,7 @@
 use super::Integer;
 use std::fmt;
 
+/// A number serialised as either an integer or a string.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum IntOrString {

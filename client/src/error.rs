@@ -1,6 +1,6 @@
 use std::str;
 
-use hyper;
+use http;
 use serde_json;
 
 #[derive(Debug, Fail)]
@@ -23,7 +23,7 @@ pub enum ClientError {
     },
 
     #[fail(display = "Unexpected HTTP response status: {}", status)]
-    HttpStatusError { status: hyper::StatusCode },
+    HttpStatusError { status: http::StatusCode },
 
     #[fail(display = "Attribute {} required but not provided", attr)]
     RequiredAttributeError { attr: &'static str },
