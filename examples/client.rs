@@ -1,12 +1,11 @@
+#![warn(unused_extern_crates)]
+
 extern crate failure;
 extern crate futures;
-extern crate hyper;
-extern crate hyper_tls;
 extern crate kubernetes_api;
+extern crate kubernetes_apimachinery;
 extern crate kubernetes_holding;
-extern crate log;
 extern crate pretty_env_logger;
-extern crate serde_json;
 extern crate tokio;
 
 use failure::Error;
@@ -15,7 +14,7 @@ use std::result::Result;
 use tokio::runtime::current_thread;
 
 use kubernetes_api::core::v1::Pods;
-use kubernetes_api::meta::v1::ListOptions;
+use kubernetes_apimachinery::meta::v1::ListOptions;
 use kubernetes_holding::client::Client;
 
 fn main_() -> Result<(), Error> {

@@ -18,6 +18,20 @@ impl<'a> GroupVersionKind<'a> {
         let gv = GroupVersion::from_str(m.api_version())?;
         Ok(gv.with_kind(m.kind()))
     }
+
+    pub fn as_gv(&self) -> GroupVersion<'a> {
+        GroupVersion {
+            group: self.group,
+            version: self.version,
+        }
+    }
+
+    pub fn as_gk(&self) -> GroupKind<'a> {
+        GroupKind {
+            group: self.group,
+            kind: self.kind,
+        }
+    }
 }
 
 impl<'a> fmt::Display for GroupVersionKind<'a> {
@@ -28,19 +42,13 @@ impl<'a> fmt::Display for GroupVersionKind<'a> {
 
 impl<'a> From<GroupVersionKind<'a>> for GroupKind<'a> {
     fn from(gvk: GroupVersionKind<'a>) -> Self {
-        GroupKind {
-            group: gvk.group,
-            kind: gvk.kind,
-        }
+        gvk.as_gk()
     }
 }
 
 impl<'a> From<GroupVersionKind<'a>> for GroupVersion<'a> {
     fn from(gvk: GroupVersionKind<'a>) -> Self {
-        GroupVersion {
-            group: gvk.group,
-            version: gvk.version,
-        }
+        gvk.as_gv()
     }
 }
 
@@ -85,6 +93,16 @@ impl<'a> GroupVersion<'a> {
             group: self.group,
             version: self.version,
             resource: rsrc,
+        }
+    }
+
+    pub fn api_prefix(&self) -> &str {
+        match self {
+            GroupVersion {
+                group: "",
+                version: "v1",
+            } => "api",
+            _ => "apis",
         }
     }
 }
@@ -156,21 +174,31 @@ pub struct GroupVersionResource<'a> {
     pub resource: &'a str,
 }
 
+impl<'a> GroupVersionResource<'a> {
+    pub fn as_gv(&self) -> GroupVersion<'a> {
+        GroupVersion {
+            group: self.group,
+            version: self.version,
+        }
+    }
+
+    pub fn as_gr(&self) -> GroupResource<'a> {
+        GroupResource {
+            group: self.group,
+            resource: self.resource,
+        }
+    }
+}
+
 impl<'a> From<GroupVersionResource<'a>> for GroupResource<'a> {
     fn from(gvr: GroupVersionResource<'a>) -> Self {
-        GroupResource {
-            group: gvr.group,
-            resource: gvr.resource,
-        }
+        gvr.as_gr()
     }
 }
 
 impl<'a> From<GroupVersionResource<'a>> for GroupVersion<'a> {
     fn from(gvr: GroupVersionResource<'a>) -> Self {
-        GroupVersion {
-            group: gvr.group,
-            version: gvr.version,
-        }
+        gvr.as_gv()
     }
 }
 

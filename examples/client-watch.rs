@@ -1,10 +1,11 @@
+#![warn(unused_extern_crates)]
+
 extern crate failure;
 extern crate futures;
 extern crate hyper;
-extern crate hyper_tls;
 extern crate kubernetes_api;
+extern crate kubernetes_apimachinery;
 extern crate kubernetes_holding;
-extern crate serde_json;
 #[macro_use]
 extern crate log;
 extern crate pretty_env_logger;
@@ -15,7 +16,7 @@ use hyper::rt;
 use std::result::Result;
 
 use kubernetes_api::core::v1::{ContainerState, Pod, PodList, PodPhase};
-use kubernetes_api::meta::v1::{EventType, ListOptions};
+use kubernetes_apimachinery::meta::v1::{ListOptions, WatchEvent};
 use kubernetes_holding::client::Client;
 
 fn print_pod_state(p: &Pod) {
@@ -93,16 +94,14 @@ fn main_() -> Result<(), Error> {
             client
                 .watch_list(&pods, namespace, listopts)
                 .for_each(|event| {
-                    match event.typ {
-                        EventType::Added | EventType::Modified => {
-                            let p: Pod = serde_json::from_value(event.object)?;
+                    match event {
+                        WatchEvent::Added(p) | WatchEvent::Modified(p) => {
                             print_pod_state(&p);
                         }
-                        EventType::Deleted => {
-                            let p: Pod = serde_json::from_value(event.object)?;
+                        WatchEvent::Deleted(p) => {
                             println!("deleted {}", p.metadata.name.unwrap_or("(no name)".into()));
                         }
-                        EventType::Error => debug!("Ignoring error event {:#?}", event.object),
+                        WatchEvent::Error(status) => debug!("Ignoring error event {:#?}", status),
                     }
                     Ok(())
                 })

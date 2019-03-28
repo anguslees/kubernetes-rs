@@ -17,12 +17,14 @@ maintenance = {status = "actively-developed,experimental"}
 members = [
    "client",
    "api",
+   "apimachinery",
    "proxy",
    "holding",
 ]
 
 [dependencies]
 kubernetes_api = { path = "api" }
+kubernetes_apimachinery = { path = "apimachinery" }
 kubernetes_client = { path = "client" }
 kubernetes_holding = { path = "holding" }
 kubernetes_proxy = { path = "proxy" }
