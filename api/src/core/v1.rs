@@ -1,6 +1,16 @@
-use apimachinery::meta::v1::{ItemList, LabelSelector, List, Metadata, ObjectMeta};
-use apimachinery::meta::{GroupVersion, GroupVersionResource};
-use apimachinery::{IntOrString, Integer, Quantity, Time, TypeMeta, TypeMetaImpl};
+use crate::policy::v1beta1::Eviction;
+use apimachinery::client::{ApiClient, ResourceClient};
+use apimachinery::meta::v1::{CreateOptions, ItemList, LabelSelector, Metadata, ObjectMeta};
+use apimachinery::meta::{
+    GroupVersion, GroupVersionResource, IntOrString, Integer, NamespaceScope, Quantity, Resource,
+    ResourceScope, Time, TypeMeta, TypeMetaImpl,
+};
+use apimachinery::request::{Request, APPLICATION_JSON};
+use apimachinery::response::Response;
+use apimachinery::{ApiService, HttpService, HttpUpgradeService};
+use failure::Error;
+use futures::{future, Future, Stream};
+use http::Method;
 use serde_json::{self, Map, Value};
 use std::borrow::Cow;
 use std::default::Default;
@@ -13,34 +23,259 @@ pub const GROUP_VERSION: GroupVersion = GroupVersion {
     version: "v1",
 };
 
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == Default::default()
+}
+
 pub struct Pods;
-
-pub trait NamespacedResource {
-    type List: List;
-
-    fn gvr(&self) -> GroupVersionResource;
-    fn namespaced(&self) -> bool;
+impl Pods {
+    fn gvr() -> GroupVersionResource<'static> {
+        GROUP_VERSION.with_resource("pods")
+    }
 }
 
-pub trait Resource {
-    type List: List;
-
-    fn gvr(&self) -> GroupVersionResource;
-}
-
-impl NamespacedResource for Pods {
+impl Resource for Pods {
+    type Item = Pod;
+    type Scope = NamespaceScope;
     type List = PodList;
+    fn gvr(&self) -> GroupVersionResource {
+        Self::gvr()
+    }
+    fn singular(&self) -> String {
+        "pod".to_string()
+    }
+}
 
-    fn namespaced(&self) -> bool {
-        true
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PodLogOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub container: Option<String>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub follow: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub previous: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub since_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub since_time: Option<Time>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub timestamps: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub tail_lines: Option<i64>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub limit_bytes: Option<i64>,
+}
+
+fn booltrue() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PodAttachOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub stdin: bool,
+    #[serde(skip_serializing_if = "is_default", default = "booltrue")]
+    pub stdout: bool,
+    #[serde(skip_serializing_if = "is_default", default = "booltrue")]
+    pub stderr: bool,
+    #[serde(skip_serializing_if = "is_default", rename = "TTY")]
+    pub tty: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub container: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PodExecOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub stdin: bool,
+    #[serde(skip_serializing_if = "is_default", default = "booltrue")]
+    pub stdout: bool,
+    #[serde(skip_serializing_if = "is_default", default = "booltrue")]
+    pub stderr: bool,
+    #[serde(skip_serializing_if = "is_default", rename = "TTY")]
+    pub tty: bool,
+    #[serde(skip_serializing_if = "is_default")]
+    pub container: Option<String>,
+    #[serde(skip_serializing_if = "is_default")]
+    pub command: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PodPortForwardOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub ports: Vec<i32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PodProxyOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub path: String,
+}
+
+// TODO: The stream errors should probably be some other error type.
+// Also: StreamItem should probably be a Buf, or replace the whole
+// thing with AsyncRead/Write.
+pub type ByteStream = Box<Stream<Item = Vec<u8>, Error = Error> + Send>;
+
+/// Trait adding extra methods to the regular Pods ResourceService.
+/// These are unusually exciting and may not be implemented for your
+/// particular client/server.
+pub trait PodsServiceExt {
+    fn read_log(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        opts: PodLogOptions,
+    ) -> Box<Future<Item = ByteStream, Error = Error> + Send>;
+
+    fn connect_portforward(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        opts: PodPortForwardOptions,
+    ) -> Box<Future<Item = (), Error = Error> + Send>;
+
+    fn proxy<I, O>(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        req: http::Request<I>,
+        opts: PodProxyOptions,
+    ) -> Box<Future<Item = http::Response<O>, Error = Error> + Send>;
+
+    fn attach(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        stdin: Option<ByteStream>,
+        opts: PodAttachOptions,
+    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
+
+    // TODO: Needs to also return Future<exit status>, and sigwinch.
+    fn exec(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        stdin: Option<ByteStream>,
+        opts: PodExecOptions,
+    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
+
+    fn create_eviction(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        value: Eviction,
+        opts: CreateOptions,
+    ) -> Box<Future<Item = Eviction, Error = Error> + Send>;
+}
+
+impl<C> PodsServiceExt for ResourceClient<ApiClient<C>, Pods>
+where
+    C: HttpService + HttpUpgradeService + Send + Sync,
+    <C as HttpService>::Future: 'static,
+    <C as HttpService>::Stream: 'static,
+    <C as HttpService>::StreamFuture: 'static,
+    <C as HttpUpgradeService>::Stream: 'static,
+    <C as HttpUpgradeService>::Future: 'static,
+    ApiClient<C>: Clone,
+{
+    fn read_log(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        opts: PodLogOptions,
+    ) -> Box<Future<Item = ByteStream, Error = Error> + Send> {
+        let gvr = Pods::gvr();
+        let req = Request {
+            group: gvr.group.to_string(),
+            version: gvr.version.to_string(),
+            resource: gvr.resource.to_string(),
+            namespace: name.namespace().map(|s| s.to_string()),
+            name: name.name().map(|s| s.to_string()),
+            subresource: Some("logs".to_string()),
+            method: Method::GET,
+            opts: opts,
+            content_type: None,
+            body: (),
+        };
+
+        let r = match req.into_http_request(self.api_client().base_url()) {
+            Ok(r) => r.map(|_| ()),
+            Err(e) => return Box::new(future::err(e)),
+        };
+
+        let result = self
+            .api_client()
+            .http_client()
+            .upgrade(r)
+            .map(|(stream, _sink)| {
+                Box::new(stream.map(|buf| Vec::from(buf.as_ref()))) as ByteStream
+            });
+
+        Box::new(result)
     }
 
-    fn gvr(&self) -> GroupVersionResource {
-        GroupVersionResource {
-            group: "",
-            version: "v1",
-            resource: "pods",
-        }
+    fn connect_portforward(
+        &self,
+        _name: &<Pods as Resource>::Scope,
+        _opts: PodPortForwardOptions,
+    ) -> Box<Future<Item = (), Error = Error> + Send> {
+        unimplemented!();
+    }
+
+    fn proxy<I, O>(
+        &self,
+        _name: &<Pods as Resource>::Scope,
+        _req: http::Request<I>,
+        _opts: PodProxyOptions,
+    ) -> Box<Future<Item = http::Response<O>, Error = Error> + Send> {
+        unimplemented!();
+    }
+
+    fn attach(
+        &self,
+        _name: &<Pods as Resource>::Scope,
+        _stdin: Option<ByteStream>,
+        _opts: PodAttachOptions,
+    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
+        unimplemented!();
+    }
+
+    // TODO: Needs to also return Future<exit status>, and sigwinch.
+    fn exec(
+        &self,
+        _name: &<Pods as Resource>::Scope,
+        _stdin: Option<ByteStream>,
+        _opts: PodExecOptions,
+    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
+        unimplemented!();
+    }
+
+    fn create_eviction(
+        &self,
+        name: &<Pods as Resource>::Scope,
+        value: Eviction,
+        opts: CreateOptions,
+    ) -> Box<Future<Item = Eviction, Error = Error> + Send> {
+        let gvr = Pods::gvr();
+
+        let req = Request {
+            group: gvr.group.to_string(),
+            version: gvr.version.to_string(),
+            resource: gvr.resource.to_string(),
+            namespace: name.namespace().map(|s| s.to_string()),
+            name: name.name().map(|s| s.to_string()),
+            subresource: Some("eviction".to_string()),
+            method: Method::POST,
+            opts: opts,
+            content_type: Some(APPLICATION_JSON),
+            body: value,
+        };
+
+        let result = self
+            .api_client()
+            .request(req)
+            .map(|resp: Response<_>| resp.into_body());
+
+        Box::new(result)
     }
 }
 
@@ -55,34 +290,6 @@ pub struct Namespace {
     pub spec: NamespaceSpec,
     #[serde(default)]
     pub status: NamespaceStatus,
-}
-
-impl NamespacedResource for Namespace {
-    type List = NamespaceList;
-
-    fn namespaced(&self) -> bool {
-        false
-    }
-
-    fn gvr(&self) -> GroupVersionResource {
-        GroupVersionResource {
-            group: "",
-            version: "v1",
-            resource: "namespaces",
-        }
-    }
-}
-
-impl Resource for Namespace {
-    type List = NamespaceList;
-
-    fn gvr(&self) -> GroupVersionResource {
-        GroupVersionResource {
-            group: "",
-            version: "v1",
-            resource: "namespaces",
-        }
-    }
 }
 
 pub type NamespaceList = ItemList<Namespace>;

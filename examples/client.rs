@@ -1,50 +1,36 @@
 #![warn(unused_extern_crates)]
 
-extern crate failure;
-extern crate futures;
-extern crate kubernetes_api;
-extern crate kubernetes_apimachinery;
-extern crate kubernetes_holding;
-extern crate pretty_env_logger;
-extern crate tokio;
-
 use failure::Error;
-use futures::prelude::*;
-use std::result::Result;
-use tokio::runtime::current_thread;
-
+use futures::stream::Stream;
 use kubernetes_api::core::v1::Pods;
 use kubernetes_apimachinery::meta::v1::ListOptions;
-use kubernetes_holding::client::Client;
+use kubernetes_apimachinery::meta::NamespaceScope;
+use kubernetes_client::Client;
+use pretty_env_logger;
+use std::default::Default;
+use std::result::Result;
+use tokio::runtime::current_thread;
 
 fn main_() -> Result<(), Error> {
     let client = Client::new()?;
 
-    let namespace = "kube-system";
-
-    let nsclient = client.namespace(namespace);
-
-    let names_future = nsclient
-        .iter(Pods {})
-        .map(|pod| pod.metadata.name.unwrap())
-        .collect();
+    let name = NamespaceScope::Namespace("kube-system".to_string());
 
     // Artificially low `limit`, to demonstrate pagination
     let opts = ListOptions {
         limit: 2,
         ..Default::default()
     };
-    let names_future2 = nsclient
-        .iter_opt(Pods {}, opts)
+
+    let names_future = client
+        .resource(Pods)
+        .iter(&name, opts)
         .map(|pod| pod.metadata.name.unwrap())
         .collect();
 
     // Resolve future synchronously, for simpler demo
     let mut rt = current_thread::Runtime::new()?;
     let names = rt.block_on(names_future)?;
-    let names2 = rt.block_on(names_future2)?;
-
-    assert_eq!(names, names2);
 
     for n in names {
         println!("Found name: {}", n);

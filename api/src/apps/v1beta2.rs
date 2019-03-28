@@ -1,6 +1,6 @@
 use crate::core::v1::{ConditionStatus, PodTemplateSpec};
 use apimachinery::meta::v1::{LabelSelector, ObjectMeta};
-use apimachinery::{IntOrString, Integer, Time};
+use apimachinery::meta::{IntOrString, Integer, Time};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]

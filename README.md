@@ -4,11 +4,12 @@
 
 ## Structure
 
-* `/api` API domain objects and supporting infrastructure. 
-  These model the k8s API and permit modelling unknown objects via 
-  `unstructured` as well as facilitating the explicit modelling of CRD types.
-* `/holding` proof of concept code we haven't found a home for.
-* `/client` code related to using the API as a consumer.
+* `/apimachinery` Version-agnostic Kubernetes API library.  Includes
+  a client implemented using abstract traits, and generic runtime
+  `unstructured` objects.
+* `/api` Kubernetes release-specific API domain objects modeled as
+  static Rust types.
+* `/client` a concrete client implementation using hyper.
 * `/proxy` to become an (explicit-where-known + unstructured passthrough where
    not) k8s proxy.
 
@@ -23,7 +24,6 @@
   currently supported method of client authentication.
 - API objects are currently manually defined and incomplete.
   Additional 3rd-party object types can be defined via traits.
-- API resources do not yet have a representation in Rust.
 - API error handling is very naive.
 
 ---
@@ -32,30 +32,27 @@ Example of listing all the pods in `kube-system` namespace.
 Results are streamed, limited to 20 results per page.
 
 ```rust
-extern crate kubernetes;
-extern crate tokio_core;
-
 use std::default::Default;
-use tokio_core::reactor::Core;
+use hyper::rt;
 
-use kubernetes::api;
-use kubernetes::client::{Client,ListOptions};
-use kubernetes::api::core::v1::{Pod,PodList};
+use kubernetes_api::core::v1::Pods;
+use kubernetes_apimachinery::meta::NamespaceScope;
+use kubernetes_apimachinery::meta::v1::ListOptions;
+use kubernetes_client::{Client,ListOptions};
 
 fn main() {
-    let mut core = Core::new().unwrap();
-    let client = Client::new(2, &core.handle()).unwrap();
+    let client = Client::new().unwrap();
 
-    let pods = api::core::v1::GROUP_VERSION.with_resource("pods");
-    let namespace = Some("kube-system");
+    let name = NamespacedScope::Namespace(String::new("kube-system"));
 
-    let opts = ListOptions{ limit: 20, ..Default::default() };
-    let work = client.iter::<PodList,Pod>(&pods, namespace, opts)
+    let work = client
+        .resource(Pods)
+        .iter(&name, ListOptions{ limit: 20, ..Default::default() })
         .for_each(|pod| {
            println!("pod is {}", pod.metadata.name.unwrap_or_default());
            Ok(())
         });
 
-    core.run(work).unwrap()
+    rt::run(work.unwrap());
 }
 ```

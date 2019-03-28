@@ -1,4 +1,5 @@
 use crate::meta::v1::{List, ListMeta, Metadata, ObjectMeta};
+use crate::meta::{ClusterScope, GroupVersionResource, NamespaceScope, Resource, ResourceScope};
 use serde_json::{self, Value};
 use std::borrow::Cow;
 
@@ -47,5 +48,60 @@ impl List for Value {
             Value::Array(v) => v,
             _ => vec![],
         }
+    }
+}
+
+pub enum DynamicScope {
+    Cluster(ClusterScope),
+    Namespace(NamespaceScope),
+}
+
+impl ResourceScope for DynamicScope {
+    fn url_segments(&self) -> Vec<&str> {
+        match self {
+            Self::Cluster(n) => n.url_segments(),
+            Self::Namespace(n) => n.url_segments(),
+        }
+    }
+    fn name(&self) -> Option<&str> {
+        match self {
+            Self::Cluster(n) => n.name(),
+            Self::Namespace(n) => n.name(),
+        }
+    }
+    fn namespace(&self) -> Option<&str> {
+        match self {
+            Self::Cluster(n) => n.namespace(),
+            Self::Namespace(n) => n.namespace(),
+        }
+    }
+}
+
+pub struct DynamicResource {
+    pub group: String,
+    pub version: String,
+    pub singular: String,
+    pub plural: String,
+}
+
+impl Resource for &DynamicResource {
+    type Item = Value;
+    type List = Value;
+    type Scope = DynamicScope;
+
+    fn gvr(&self) -> GroupVersionResource {
+        GroupVersionResource {
+            group: &self.group,
+            version: &self.version,
+            resource: &self.plural,
+        }
+    }
+
+    fn singular(&self) -> String {
+        self.singular.clone()
+    }
+
+    fn plural(&self) -> String {
+        self.plural.clone()
     }
 }

@@ -1,10 +1,28 @@
+use crate::meta::v1::{DeleteOptions, GetOptions, ListOptions, UpdateOptions, WatchEvent};
+use crate::request::Patch;
+use failure::Error;
+use futures::{Future, Stream};
+use serde::de::{self, Deserialize, DeserializeOwned, Deserializer, Unexpected};
+use serde::ser::{Serialize, Serializer};
+use std::borrow::Cow;
 use std::convert::From;
 use std::fmt;
+use std::marker::PhantomData;
 use std::result::Result;
 
+mod intstr;
 pub mod v1;
 
-// GroupVersionKind unambiguously identifies a kind.
+pub type Time = String;
+pub type Integer = i32;
+pub use self::intstr::IntOrString;
+
+// A fixed-point integer, serialised as a particular string format.
+// See k8s.io/apimachinery/pkg/api/resource/quantity.go
+// TODO: implement this with some appropriate Rust type.
+pub type Quantity = String;
+
+/// GroupVersionKind unambiguously identifies a kind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupVersionKind<'a> {
     pub group: &'a str,
@@ -52,8 +70,8 @@ impl<'a> From<GroupVersionKind<'a>> for GroupVersion<'a> {
     }
 }
 
-// GroupVersion contains the "group" and the "version", which uniquely
-// identifies the API.
+/// GroupVersion contains the "group" and the "version", which uniquely
+/// identifies the API.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupVersion<'a> {
     pub group: &'a str,
@@ -141,9 +159,9 @@ fn gv_fromstr() {
     assert_eq!(GroupVersion::from_str("v1/a").unwrap(), gv("v1", "a"));
 }
 
-// GroupKind specifies a Group and a Kind, but does not force a
-// version.  This is useful for identifying concepts during lookup
-// stages without having partially valid types.
+/// GroupKind specifies a Group and a Kind, but does not force a
+/// version.  This is useful for identifying concepts during lookup
+/// stages without having partially valid types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupKind<'a> {
     pub group: &'a str,
@@ -166,7 +184,7 @@ impl<'a> fmt::Display for GroupKind<'a> {
     }
 }
 
-// GroupVersionResource unambiguously identifies a resource.
+/// GroupVersionResource unambiguously identifies a resource.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupVersionResource<'a> {
     pub group: &'a str,
@@ -212,9 +230,9 @@ impl<'a> fmt::Display for GroupVersionResource<'a> {
     }
 }
 
-// GroupResource specifies a Group and a Resource, but does not force
-// a version.  This is useful for identifying concepts during lookup
-// stages without having partially valid types.
+/// GroupResource specifies a Group and a Resource, but does not force
+/// a version.  This is useful for identifying concepts during lookup
+/// stages without having partially valid types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupResource<'a> {
     pub group: &'a str,
@@ -267,4 +285,335 @@ fn gr_fromstr() {
     assert_eq!(GroupResource::from_str("v1.").unwrap(), gr("", "v1"));
     assert_eq!(GroupResource::from_str("v1.a").unwrap(), gr("a", "v1"));
     assert_eq!(GroupResource::from_str("b.v1.a").unwrap(), gr("v1.a", "b"));
+}
+
+/// Kubernetes API type information for a static Rust type.
+pub trait TypeMeta {
+    fn api_version() -> &'static str;
+    fn kind() -> &'static str;
+}
+
+/// Zero-sized struct that serializes to/from apiVersion/kind struct
+/// based on type parameter.
+#[derive(Default, Debug, Clone)]
+pub struct TypeMetaImpl<T>(PhantomData<T>);
+
+impl<T: TypeMeta> ::serde::de::Expected for TypeMetaImpl<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}/{}", T::api_version(), T::kind())
+    }
+}
+
+impl<T> PartialEq for TypeMetaImpl<T> {
+    fn eq(&self, _rhs: &Self) -> bool {
+        true
+    }
+}
+
+/// Like TypeMetaImpl, but contains non-constant apiVersion/kind.
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "TypeMeta", rename_all = "camelCase")]
+struct TypeMetaRuntime<'a> {
+    #[serde(borrow)]
+    api_version: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    kind: Option<Cow<'a, str>>,
+}
+
+impl<T: TypeMeta> Serialize for TypeMetaImpl<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let tmp = TypeMetaRuntime {
+            api_version: Some(Cow::from(T::api_version())),
+            kind: Some(Cow::from(T::kind())),
+        };
+        tmp.serialize(serializer)
+    }
+}
+
+impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaImpl<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let t = TypeMetaRuntime::deserialize(deserializer)?;
+        let ret = TypeMetaImpl(PhantomData);
+        match (t.api_version, t.kind) {
+            (Some(a), Some(k)) => {
+                if a == T::api_version() && k == T::kind() {
+                    Ok(ret)
+                } else {
+                    let found = format!("{}/{}", a, k);
+                    Err(de::Error::invalid_value(Unexpected::Other(&found), &ret))
+                }
+            }
+
+            // No apiVersion/kind specified -> assume valid in context
+            (None, None) => Ok(ret),
+
+            // Partially specified -> invalid
+            (Some(_), None) => Err(de::Error::missing_field("kind")),
+            (None, Some(_)) => Err(de::Error::missing_field("apiVersion")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate serde_test;
+    use self::serde_test::{assert_de_tokens, assert_de_tokens_error, assert_tokens, Token};
+    use super::*;
+
+    #[derive(Debug)]
+    struct TestType;
+    impl TypeMeta for TestType {
+        fn api_version() -> &'static str {
+            "v1alpha1"
+        }
+        fn kind() -> &'static str {
+            "Test"
+        }
+    }
+
+    #[test]
+    fn test_typemeta_serde() {
+        let t: TypeMetaImpl<TestType> = TypeMetaImpl(PhantomData);
+
+        assert_tokens(
+            &t,
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 2,
+                },
+                Token::Str("apiVersion"),
+                Token::Some,
+                Token::BorrowedStr("v1alpha1"),
+                Token::Str("kind"),
+                Token::Some,
+                Token::BorrowedStr("Test"),
+                Token::StructEnd,
+            ],
+        );
+
+        // Reversed order of fields
+        assert_de_tokens(
+            &t,
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 2,
+                },
+                Token::Str("kind"),
+                Token::Some,
+                Token::BorrowedStr("Test"),
+                Token::Str("apiVersion"),
+                Token::Some,
+                Token::BorrowedStr("v1alpha1"),
+                Token::StructEnd,
+            ],
+        );
+
+        // No apiVersion/kind is also ok
+        assert_de_tokens(
+            &t,
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 0,
+                },
+                Token::StructEnd,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_typemeta_serde_error() {
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 1,
+                },
+                Token::Str("kind"),
+                Token::Some,
+                Token::BorrowedStr("TestType"),
+                Token::StructEnd,
+            ],
+            "missing field `apiVersion`",
+        );
+
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 1,
+                },
+                Token::Str("apiVersion"),
+                Token::Some,
+                Token::BorrowedStr("bogus"),
+                Token::StructEnd,
+            ],
+            "missing field `kind`",
+        );
+
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 1,
+                },
+                Token::Str("apiVersion"),
+                Token::Some,
+                Token::Str("v1alpha1"),
+                Token::Str("apiVersion"),
+                Token::StructEnd,
+            ],
+            "duplicate field `apiVersion`",
+        );
+
+        assert_de_tokens_error::<TypeMetaImpl<TestType>>(
+            &[
+                Token::Struct {
+                    name: "TypeMeta",
+                    len: 2,
+                },
+                Token::Str("kind"),
+                Token::Some,
+                Token::Str("NotTest"),
+                Token::Str("apiVersion"),
+                Token::Some,
+                Token::Str("v1alpha1"),
+                Token::StructEnd,
+            ],
+            "invalid value: v1alpha1/NotTest, expected v1alpha1/Test",
+        );
+    }
+}
+
+pub trait ResourceScope {
+    fn url_segments(&self) -> Vec<&str>;
+    fn name(&self) -> Option<&str>;
+    fn namespace(&self) -> Option<&str>;
+}
+
+#[derive(Debug, Clone)]
+pub enum NamespaceScope {
+    Cluster,
+    Namespace(String),
+    Name { namespace: String, name: String },
+}
+
+impl ResourceScope for NamespaceScope {
+    fn url_segments(&self) -> Vec<&str> {
+        match self {
+            Self::Cluster => vec![],
+            Self::Namespace(ns) => vec!["namespace", &ns],
+            Self::Name {
+                namespace: ns,
+                name: n,
+            } => vec!["namespace", &ns, &n],
+        }
+    }
+
+    fn name(&self) -> Option<&str> {
+        match self {
+            Self::Cluster => None,
+            Self::Namespace(_) => None,
+            Self::Name {
+                namespace: _ns,
+                name: n,
+            } => Some(&n),
+        }
+    }
+
+    fn namespace(&self) -> Option<&str> {
+        match self {
+            Self::Cluster => None,
+            Self::Namespace(ns) => Some(&ns),
+            Self::Name {
+                namespace: ns,
+                name: _n,
+            } => Some(&ns),
+        }
+    }
+}
+
+pub enum ClusterScope {
+    Cluster,
+    Name(String),
+}
+
+impl ResourceScope for ClusterScope {
+    fn url_segments(&self) -> Vec<&str> {
+        match self {
+            Self::Cluster => vec![],
+            Self::Name(n) => vec![&n],
+        }
+    }
+
+    fn name(&self) -> Option<&str> {
+        match self {
+            Self::Cluster => None,
+            Self::Name(n) => Some(&n),
+        }
+    }
+
+    fn namespace(&self) -> Option<&str> {
+        None
+    }
+}
+
+pub trait Resource {
+    type Item: Serialize + DeserializeOwned + v1::Metadata + Send + 'static;
+    type Scope: ResourceScope;
+    type List: Serialize + DeserializeOwned + v1::List<Item = Self::Item> + Send + 'static;
+    fn gvr(&self) -> GroupVersionResource;
+    fn singular(&self) -> String;
+    fn plural(&self) -> String {
+        return self.singular() + "s";
+    }
+}
+
+pub trait ResourceService {
+    type Resource: Resource;
+    // Note to self: match RBAC verbs, not API docs ("get", not "read"; "update" not "replace")
+    fn get(
+        &self,
+        name: &<Self::Resource as Resource>::Scope,
+        opts: GetOptions,
+    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    fn list(
+        &self,
+        name: &<Self::Resource as Resource>::Scope,
+        opts: ListOptions,
+    ) -> Future<Item = <Self::Resource as Resource>::List, Error = Error> + Send;
+    fn watch(
+        &self,
+        name: &<Self::Resource as Resource>::Scope,
+        opts: ListOptions,
+    ) -> Stream<Item = WatchEvent<<Self::Resource as Resource>::Item>, Error = Error> + Send;
+    fn create(
+        &self,
+        value: <Self::Resource as Resource>::Item,
+        opts: GetOptions,
+    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    fn patch(
+        &self,
+        name: &<Self::Resource as Resource>::Scope,
+        patch: Patch,
+        opts: UpdateOptions,
+    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    fn update(
+        &self,
+        value: <Self::Resource as Resource>::Item,
+        opts: UpdateOptions,
+    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    fn delete(
+        &self,
+        name: &<Self::Resource as Resource>::Scope,
+        opts: DeleteOptions,
+    ) -> Future<Item = (), Error = Error> + Send;
 }
