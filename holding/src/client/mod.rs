@@ -1,35 +1,36 @@
+use self::config::ConfigContext;
+use api::core::v1::{NamespacedResource, Resource};
+use apimachinery::meta::v1::{
+    DeleteOptions, GetOptions, List, ListOptions, Metadata, ObjectMeta, Status, WatchEvent,
+};
+use apimachinery::meta::GroupVersionResource;
+use apimachinery::TypeMeta;
+use failure::{Error, ResultExt};
+use futures::{future, stream, Future, Stream};
+use hyper::header::{HeaderValue, CONTENT_TYPE};
+use hyper::{self, Body, Method, Request};
+use hyper_tls::HttpsConnector;
+use k8sclient::error::ClientError;
+use native_tls::{Certificate, Identity, TlsConnector};
+use openssl;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use serde_json;
 use std::default::Default;
 use std::env;
 use std::fmt;
 use std::path::PathBuf;
 use std::str;
 use std::sync::Arc;
-
-use failure::{Error, ResultExt};
-use futures::{future, stream, Future, Stream};
-use hyper::header::{HeaderValue, CONTENT_TYPE};
-use hyper::{self, Body, Method, Request};
-use hyper_tls::HttpsConnector;
-use native_tls::{Certificate, Identity, TlsConnector};
-use openssl;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use serde_json;
-use serde_urlencoded;
 use url::Url;
-
-use api::core::v1::{NamespacedResource, Resource};
-use api::meta::v1::{
-    DeleteOptions, GetOptions, List, ListOptions, Metadata, ObjectMeta, Status, WatchEvent,
-};
-use api::meta::GroupVersionResource;
-use api::TypeMeta;
-use k8sclient::error::ClientError;
 
 pub mod config;
 mod resplit;
 
-use self::config::ConfigContext;
+pub const APPLICATION_JSON: &str = "application/json";
+pub const JSON_PATCH: &str = "application/json-patch+json";
+pub const MERGE_PATCH: &str = "application/merge-patch+json";
+pub const STRATEGIC_MERGE_PATCH: &str = "application/strategic-merge-patch+json";
 
 #[derive(Debug, Clone)]
 pub struct Client<C> {
@@ -206,7 +207,7 @@ where
                         .and_then(move |body| {
                             let status: Status = serde_json::from_slice(body.as_ref()).map_err(
                                 |e| {
-                                    debug!("Failed to parse error Status ({}), falling back to HTTP status", 
+                                    debug!("Failed to parse error Status ({}), falling back to HTTP status",
                                         ClientError::new_decode_error("error Status", &e, body.to_vec()));
                                     ClientError::HttpStatusError { status: httpstatus }
                                 },
@@ -463,13 +464,16 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_request(Arc::clone(&self.client), req)
     }
 
-    pub fn watch(
+    pub fn watch<T>(
         &self,
         gvr: &GroupVersionResource,
         namespace: Option<&str>,
         name: &str,
         mut opts: ListOptions,
-    ) -> impl Stream<Item = WatchEvent, Error = Error> + Send {
+    ) -> impl Stream<Item = WatchEvent<T>, Error = Error> + Send
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
         opts.watch = true;
         let req = self.url(gvr, namespace, Some(name), opts).and_then(|url| {
             Request::builder()
@@ -481,12 +485,15 @@ impl<C: hyper::client::connect::Connect + 'static> Client<C> {
         do_watch(&self.client, req)
     }
 
-    pub fn watch_list(
+    pub fn watch_list<T>(
         &self,
         gvr: &GroupVersionResource,
         namespace: Option<&str>,
         mut opts: ListOptions,
-    ) -> impl Stream<Item = WatchEvent, Error = Error> + Send {
+    ) -> impl Stream<Item = WatchEvent<T>, Error = Error> + Send
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
         opts.watch = true;
         let req = self.url(gvr, namespace, None, opts).and_then(|url| {
             Request::builder()

@@ -57,23 +57,25 @@ pub struct Initializer {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     //pub api_version: String,
     //pub kind: String,
+    #[serde(default)]
     pub metadata: ListMeta,
+    #[serde(default)]
     pub code: Integer,
     pub details: Option<StatusDetails>,
-    pub message: String,
+    pub message: Option<String>,
     pub reason: Option<StatusReason>,
-    pub status: StatusStatus,
+    pub status: Option<StatusStatus>,
 }
 
 impl StdError for Status {
     fn description(&self) -> &str {
-        if self.message != "" {
-            &self.message
+        if let Some(ref msg) = self.message {
+            msg
         } else {
             "request failed"
         }
@@ -88,8 +90,8 @@ impl fmt::Display for Status {
             write!(f, "{:?}", self.status)?;
         }
 
-        if self.message != "" {
-            write!(f, ": {}", self.message)?;
+        if let Some(ref msg) = self.message {
+            write!(f, ": {}", msg)?;
         }
         if let Some(ref d) = self.details {
             for cause in &d.causes {
@@ -129,7 +131,7 @@ pub enum StatusReason {
     ServiceUnavailable,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusDetails {
     #[serde(default)]
@@ -253,20 +255,21 @@ pub struct ServerAddressByClientCIDR {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct WatchEvent {
-    #[serde(rename = "type")]
-    pub typ: EventType,
-    pub object: Value,
+#[serde(rename_all = "SCREAMING_SNAKE_CASE", tag = "type", content = "object")]
+pub enum WatchEvent<T> {
+    Added(T),
+    Modified(T),
+    Deleted(T),
+    Error(Status), // Move this out into a Result<WatchEvent,Status> wrapper?
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum EventType {
-    Added,
-    Modified,
-    Deleted,
-    Error,
+impl<T> WatchEvent<T> {
+    pub fn is_error(&self) -> bool {
+        match self {
+            WatchEvent::Added(_) | WatchEvent::Modified(_) | WatchEvent::Deleted(_) => false,
+            WatchEvent::Error(_) => true,
+        }
+    }
 }
 
 /// Not part of the standard k8s API
@@ -331,6 +334,11 @@ fn is_default<T: Default + PartialEq>(v: &T) -> bool {
     *v == Default::default()
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum DryRun {
+    All,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct GetOptions {
@@ -340,6 +348,22 @@ pub struct GetOptions {
     pub resource_version: String,
     #[serde(skip_serializing_if = "is_default")]
     pub include_uninitialized: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CreateOptions {
+    #[serde(skip_serializing_if = "is_default")]
+    pub include_uninitialized: bool,
+    #[serde(skip_serializing_if = "is_default", default)]
+    pub dry_run: Vec<DryRun>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct UpdateOptions {
+    #[serde(skip_serializing_if = "is_default", default)]
+    pub dry_run: Vec<DryRun>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -366,6 +390,8 @@ pub struct DeleteOptions {
     pub orphan_dependents: Option<bool>,
     #[serde(skip_serializing_if = "is_default")]
     pub propagation_policy: Option<DeletionPropagation>,
+    #[serde(skip_serializing_if = "is_default", default)]
+    pub dry_run: Vec<DryRun>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -425,8 +451,10 @@ impl<'a, T> IntoIterator for &'a mut List<Item = T> {
 
 #[cfg(test)]
 mod tests {
-    use super::Metadata;
+    use super::*;
+    use api::core::v1::Pod;
     use serde_json::{self, Value};
+    use std::default::Default;
 
     fn pod_json() -> Value {
         json!({
@@ -457,8 +485,46 @@ mod tests {
 
     #[test]
     fn typed() {
-        use crate::core::v1::Pod;
         let pod: Pod = serde_json::from_value(pod_json()).unwrap();
         assert_eq!(pod.spec.containers[0].image, Some("busybox".into()));
+    }
+
+    #[test]
+    fn watchevent() {
+        let input = json!({
+            "type": "ADDED",
+            "object": pod_json()
+        });
+        let ev: WatchEvent<Pod> = serde_json::from_value(input).unwrap();
+
+        let mut pod: Pod = Default::default();
+        pod.metadata.name = Some("pod-example".to_string());
+        pod.spec.containers = vec![Default::default()];
+        pod.spec.containers[0].image = Some("busybox".to_string());
+        pod.spec.containers[0].command = vec!["echo".to_string()];
+        pod.spec.containers[0].args = vec!["Hello world".to_string()];
+        assert_eq!(ev, WatchEvent::Added(pod));
+    }
+
+    #[test]
+    fn watchevent_error() {
+        let input = json!({
+            "type": "ERROR",
+            "object": json!({
+                "code": 404,
+                "message": "double-plus unfound",
+                "status": "Failure"
+            })
+        });
+        let ev: WatchEvent<Pod> = serde_json::from_value(input).unwrap();
+        assert_eq!(
+            ev,
+            WatchEvent::Error(Status {
+                code: 404,
+                message: Some("double-plus unfound".to_string()),
+                status: Some(StatusStatus::Failure),
+                ..Default::default()
+            })
+        );
     }
 }

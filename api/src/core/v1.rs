@@ -1,6 +1,6 @@
-use crate::meta::v1::{ItemList, LabelSelector, List, Metadata, ObjectMeta};
-use crate::meta::{GroupVersion, GroupVersionResource};
-use crate::{IntOrString, Integer, Quantity, Time, TypeMeta, TypeMetaImpl};
+use apimachinery::meta::v1::{ItemList, LabelSelector, List, Metadata, ObjectMeta};
+use apimachinery::meta::{GroupVersion, GroupVersionResource};
+use apimachinery::{IntOrString, Integer, Quantity, Time, TypeMeta, TypeMetaImpl};
 use serde_json::{self, Map, Value};
 use std::borrow::Cow;
 use std::default::Default;
@@ -115,7 +115,7 @@ pub struct NamespaceSpec {
     pub finalizers: Vec<String>,
 }
 
-const FINALIZER_KUBERNETES: &str = "kubernetes";
+pub const FINALIZER_KUBERNETES: &str = "kubernetes";
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]

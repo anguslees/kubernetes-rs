@@ -1,8 +1,8 @@
 [package]
-name = "kubernetes_holding"
+name = "kubernetes_apimachinery"
 version = "0.2.0"
 authors = ["Angus Lees <gus@inodes.org>"]
-description = "Code that is being moved to better homes"
+description = "A Kubernetes API encoding for Rust"
 repository = "https://github.com/anguslees/kubernetes-rs"
 readme = "README.md"
 keywords = ["kubernetes"]
@@ -13,23 +13,12 @@ license = "Apache-2.0"
 maintenance = {status = "actively-developed,experimental"}
 
 [dependencies]
-base64 = "0.9"
-dirs = "1.0"
 failure = "0.1.1"
-futures = "0.1.21"
-hyper = "0.12"
-hyper-tls = "0.3"
-kubernetes_api = { path = "../api" }
-kubernetes_apimachinery = { path = "../apimachinery" }
-kubernetes_client = { path = "../client" }
-log = "0.4"
-native-tls = "0.2"
-openssl = "0.10"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-serde_urlencoded = "0.5"
-serde_yaml = "0.7"
-url = "1.6"
 
 [dev-dependencies]
+kubernetes_api = { path = "../api" }
+serde_test = "1.0"
+serde_yaml = "0.7"

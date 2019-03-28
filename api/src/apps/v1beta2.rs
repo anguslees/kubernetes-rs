@@ -1,6 +1,6 @@
-use super::super::core::v1::{ConditionStatus, PodTemplateSpec};
-use super::super::meta::v1::{LabelSelector, ObjectMeta};
-use super::super::{IntOrString, Integer, Time};
+use crate::core::v1::{ConditionStatus, PodTemplateSpec};
+use apimachinery::meta::v1::{LabelSelector, ObjectMeta};
+use apimachinery::{IntOrString, Integer, Time};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
