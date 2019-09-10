@@ -65,7 +65,9 @@ fn print_pod_state(p: &Pod) {
     }
 }
 
-fn main_() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
+    pretty_env_logger::init();
+
     let client = Client::new()?;
 
     let name = NamespaceScope::Namespace("kube-system".to_string());
@@ -113,20 +115,4 @@ fn main_() -> Result<(), Error> {
     rt::run(watch.map_err(|err| panic!("Error: {}", err)));
 
     Ok(())
-}
-
-fn main() {
-    pretty_env_logger::init();
-    let status = match main_() {
-        Ok(_) => 0,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            for c in e.iter_chain().skip(1) {
-                eprintln!(" Caused by {}", c);
-            }
-            debug!("Backtrace: {}", e.backtrace());
-            1
-        }
-    };
-    ::std::process::exit(status);
 }
