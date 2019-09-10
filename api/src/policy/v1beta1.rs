@@ -1,5 +1,6 @@
-use apimachinery::meta::v1::{DeleteOptions, Metadata, ObjectMeta};
-use apimachinery::meta::{GroupVersion, TypeMeta, TypeMetaImpl};
+use kubernetes_apimachinery::meta::v1::{DeleteOptions, Metadata, ObjectMeta};
+use kubernetes_apimachinery::meta::{GroupVersion, TypeMeta, TypeMetaImpl};
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 const API_GROUP: &str = "policy/v1beta1";

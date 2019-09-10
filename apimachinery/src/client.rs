@@ -11,6 +11,7 @@ use failure::ResultExt;
 use futures::{self, future, stream, Future, Stream};
 use http::header::{HeaderMap, HeaderValue, ValueIter, CONTENT_LENGTH};
 use http::{self, Method};
+use log::debug;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::convert::TryFrom;
@@ -61,7 +62,7 @@ impl<'a, C: ?Sized + ApiService> ApiService for &'a C {
     fn request<B, O, B2>(
         &self,
         req: Request<B, O>,
-    ) -> Box<Future<Item = Response<B2>, Error = Error> + Send>
+    ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
     where
         B: Serialize + Send + 'static,
         O: Serialize + Send + 'static,
@@ -70,7 +71,10 @@ impl<'a, C: ?Sized + ApiService> ApiService for &'a C {
         (**self).request(req)
     }
 
-    fn watch<B, O, B2>(&self, req: Request<B, O>) -> Box<Stream<Item = B2, Error = Error> + Send>
+    fn watch<B, O, B2>(
+        &self,
+        req: Request<B, O>,
+    ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
     where
         B: Serialize + Send + 'static,
         O: Serialize + Send + 'static,
@@ -90,7 +94,7 @@ where
     fn request<B, O, B2>(
         &self,
         req: Request<B, O>,
-    ) -> Box<Future<Item = Response<B2>, Error = Error> + Send>
+    ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
     where
         B: Serialize + Send + 'static,
         O: Serialize + Send + 'static,
@@ -111,7 +115,10 @@ where
         Box::new(f)
     }
 
-    fn watch<B, O, B2>(&self, req: Request<B, O>) -> Box<Stream<Item = B2, Error = Error> + Send>
+    fn watch<B, O, B2>(
+        &self,
+        req: Request<B, O>,
+    ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
     where
         B: Serialize + Send + 'static,
         O: Serialize + Send + 'static,
@@ -434,7 +441,7 @@ mod test {
     use crate::meta::v1::{ItemList, Metadata, ObjectMeta};
     use crate::meta::{GroupVersionResource, NamespaceScope, TypeMeta, TypeMetaImpl};
     use futures::IntoFuture;
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
     use std::borrow::Cow;
 
     #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
@@ -515,7 +522,7 @@ mod test {
         fn request<B, O, B2>(
             &self,
             req: Request<B, O>,
-        ) -> Box<Future<Item = Response<B2>, Error = Error> + Send>
+        ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
         where
             B: Serialize + Send + 'static,
             O: Serialize + Send + 'static,
@@ -551,7 +558,7 @@ mod test {
         fn watch<B, O, B2>(
             &self,
             req: Request<B, O>,
-        ) -> Box<Stream<Item = B2, Error = Error> + Send>
+        ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
         where
             B: Serialize + Send + 'static,
             O: Serialize + Send + 'static,

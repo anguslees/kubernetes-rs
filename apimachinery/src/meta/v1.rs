@@ -1,12 +1,13 @@
 use crate::meta::{Integer, Time, TypeMeta, TypeMetaImpl};
 use crate::response::DecodeError;
 use failure::{Error, ResultExt};
+use log::debug;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
-use std::slice;
 use std::sync::Once;
 
 const API_GROUP: &str = "v1";
@@ -455,29 +456,11 @@ pub trait List {
     fn into_items(self) -> Vec<Self::Item>;
 }
 
-impl<'a, T> IntoIterator for &'a List<Item = T> {
-    type Item = &'a T;
-    type IntoIter = slice::Iter<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.items().into_iter()
-    }
-}
-
-impl<'a, T> IntoIterator for &'a mut List<Item = T> {
-    type Item = &'a mut T;
-    type IntoIter = slice::IterMut<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.items_mut().iter_mut()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use api::core::v1::Pod;
-    use serde_json::{self, Value};
+    use kubernetes_api::core::v1::Pod;
+    use serde_json::{self, json, Value};
     use std::default::Default;
 
     fn pod_json() -> Value {

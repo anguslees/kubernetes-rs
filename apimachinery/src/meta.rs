@@ -1,9 +1,10 @@
 use crate::meta::v1::{DeleteOptions, GetOptions, ListOptions, UpdateOptions, WatchEvent};
 use crate::request::Patch;
-use failure::Error;
+use failure::{Error, Fail};
 use futures::{Future, Stream};
-use serde::de::{self, Deserialize, DeserializeOwned, Deserializer, Unexpected};
-use serde::ser::{Serialize, Serializer};
+use serde::de::{self, DeserializeOwned, Deserializer, Unexpected};
+use serde::ser::Serializer;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::convert::From;
 use std::fmt;
@@ -362,9 +363,8 @@ impl<'de: 'a, 'a, T: TypeMeta> Deserialize<'de> for TypeMetaImpl<T> {
 
 #[cfg(test)]
 mod tests {
-    extern crate serde_test;
-    use self::serde_test::{assert_de_tokens, assert_de_tokens_error, assert_tokens, Token};
     use super::*;
+    use serde_test::{assert_de_tokens, assert_de_tokens_error, assert_tokens, Token};
 
     #[derive(Debug)]
     struct TestType;
@@ -584,36 +584,36 @@ pub trait ResourceService {
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: GetOptions,
-    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
     fn list(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: ListOptions,
-    ) -> Future<Item = <Self::Resource as Resource>::List, Error = Error> + Send;
+    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::List, Error = Error> + Send>;
     fn watch(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: ListOptions,
-    ) -> Stream<Item = WatchEvent<<Self::Resource as Resource>::Item>, Error = Error> + Send;
+    ) -> Box<dyn Stream<Item = WatchEvent<<Self::Resource as Resource>::Item>, Error = Error> + Send>;
     fn create(
         &self,
         value: <Self::Resource as Resource>::Item,
         opts: GetOptions,
-    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
     fn patch(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         patch: Patch,
         opts: UpdateOptions,
-    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
     fn update(
         &self,
         value: <Self::Resource as Resource>::Item,
         opts: UpdateOptions,
-    ) -> Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send;
+    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
     fn delete(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: DeleteOptions,
-    ) -> Future<Item = (), Error = Error> + Send;
+    ) -> Box<dyn Future<Item = (), Error = Error> + Send>;
 }

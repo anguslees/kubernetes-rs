@@ -1,4 +1,5 @@
-use apimachinery::serde_base64;
+use kubernetes_apimachinery::serde_base64;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;

@@ -1,16 +1,19 @@
 use crate::policy::v1beta1::Eviction;
-use apimachinery::client::{ApiClient, ResourceClient};
-use apimachinery::meta::v1::{CreateOptions, ItemList, LabelSelector, Metadata, ObjectMeta};
-use apimachinery::meta::{
-    GroupVersion, GroupVersionResource, IntOrString, Integer, NamespaceScope, Quantity, Resource,
-    ResourceScope, Time, TypeMeta, TypeMetaImpl,
-};
-use apimachinery::request::{Request, APPLICATION_JSON};
-use apimachinery::response::Response;
-use apimachinery::{ApiService, HttpService, HttpUpgradeService};
 use failure::Error;
 use futures::{future, Future, Stream};
 use http::Method;
+use kubernetes_apimachinery::client::{ApiClient, ResourceClient};
+use kubernetes_apimachinery::meta::v1::{
+    CreateOptions, ItemList, LabelSelector, Metadata, ObjectMeta,
+};
+use kubernetes_apimachinery::meta::{
+    GroupVersion, GroupVersionResource, IntOrString, Integer, NamespaceScope, Quantity, Resource,
+    ResourceScope, Time, TypeMeta, TypeMetaImpl,
+};
+use kubernetes_apimachinery::request::{Request, APPLICATION_JSON};
+use kubernetes_apimachinery::response::Response;
+use kubernetes_apimachinery::{ApiService, HttpService, HttpUpgradeService};
+use serde::{Deserialize, Serialize};
 use serde_json::{self, Map, Value};
 use std::borrow::Cow;
 use std::default::Default;
@@ -120,7 +123,7 @@ pub struct PodProxyOptions {
 // TODO: The stream errors should probably be some other error type.
 // Also: StreamItem should probably be a Buf, or replace the whole
 // thing with AsyncRead/Write.
-pub type ByteStream = Box<Stream<Item = Vec<u8>, Error = Error> + Send>;
+pub type ByteStream = Box<dyn Stream<Item = Vec<u8>, Error = Error> + Send>;
 
 /// Trait adding extra methods to the regular Pods ResourceService.
 /// These are unusually exciting and may not be implemented for your
@@ -130,27 +133,27 @@ pub trait PodsServiceExt {
         &self,
         name: &<Pods as Resource>::Scope,
         opts: PodLogOptions,
-    ) -> Box<Future<Item = ByteStream, Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = ByteStream, Error = Error> + Send>;
 
     fn connect_portforward(
         &self,
         name: &<Pods as Resource>::Scope,
         opts: PodPortForwardOptions,
-    ) -> Box<Future<Item = (), Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = (), Error = Error> + Send>;
 
     fn proxy<I, O>(
         &self,
         name: &<Pods as Resource>::Scope,
         req: http::Request<I>,
         opts: PodProxyOptions,
-    ) -> Box<Future<Item = http::Response<O>, Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = http::Response<O>, Error = Error> + Send>;
 
     fn attach(
         &self,
         name: &<Pods as Resource>::Scope,
         stdin: Option<ByteStream>,
         opts: PodAttachOptions,
-    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
 
     // TODO: Needs to also return Future<exit status>, and sigwinch.
     fn exec(
@@ -158,14 +161,14 @@ pub trait PodsServiceExt {
         name: &<Pods as Resource>::Scope,
         stdin: Option<ByteStream>,
         opts: PodExecOptions,
-    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
 
     fn create_eviction(
         &self,
         name: &<Pods as Resource>::Scope,
         value: Eviction,
         opts: CreateOptions,
-    ) -> Box<Future<Item = Eviction, Error = Error> + Send>;
+    ) -> Box<dyn Future<Item = Eviction, Error = Error> + Send>;
 }
 
 impl<C> PodsServiceExt for ResourceClient<ApiClient<C>, Pods>
@@ -182,7 +185,7 @@ where
         &self,
         name: &<Pods as Resource>::Scope,
         opts: PodLogOptions,
-    ) -> Box<Future<Item = ByteStream, Error = Error> + Send> {
+    ) -> Box<dyn Future<Item = ByteStream, Error = Error> + Send> {
         let gvr = Pods::gvr();
         let req = Request {
             group: gvr.group.to_string(),
@@ -217,7 +220,7 @@ where
         &self,
         _name: &<Pods as Resource>::Scope,
         _opts: PodPortForwardOptions,
-    ) -> Box<Future<Item = (), Error = Error> + Send> {
+    ) -> Box<dyn Future<Item = (), Error = Error> + Send> {
         unimplemented!();
     }
 
@@ -226,7 +229,7 @@ where
         _name: &<Pods as Resource>::Scope,
         _req: http::Request<I>,
         _opts: PodProxyOptions,
-    ) -> Box<Future<Item = http::Response<O>, Error = Error> + Send> {
+    ) -> Box<dyn Future<Item = http::Response<O>, Error = Error> + Send> {
         unimplemented!();
     }
 
@@ -235,7 +238,7 @@ where
         _name: &<Pods as Resource>::Scope,
         _stdin: Option<ByteStream>,
         _opts: PodAttachOptions,
-    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
+    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
         unimplemented!();
     }
 
@@ -245,7 +248,7 @@ where
         _name: &<Pods as Resource>::Scope,
         _stdin: Option<ByteStream>,
         _opts: PodExecOptions,
-    ) -> Box<Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
+    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
         unimplemented!();
     }
 
@@ -254,7 +257,7 @@ where
         name: &<Pods as Resource>::Scope,
         value: Eviction,
         opts: CreateOptions,
-    ) -> Box<Future<Item = Eviction, Error = Error> + Send> {
+    ) -> Box<dyn Future<Item = Eviction, Error = Error> + Send> {
         let gvr = Pods::gvr();
 
         let req = Request {

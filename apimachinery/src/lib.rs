@@ -1,21 +1,4 @@
 #![warn(unused_extern_crates)]
-#![allow(bare_trait_objects)] // TODO as part of 2018 update
-
-extern crate base64;
-#[macro_use]
-extern crate failure;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate futures;
-extern crate http;
-#[cfg(test)]
-extern crate kubernetes_api as api;
-#[macro_use]
-extern crate log;
-#[cfg_attr(test, macro_use)]
-extern crate serde_json;
-extern crate serde_urlencoded;
 
 use crate::request::Request;
 use crate::response::Response;
@@ -39,13 +22,16 @@ pub trait ApiService {
     fn request<B, O, B2>(
         &self,
         req: Request<B, O>,
-    ) -> Box<Future<Item = Response<B2>, Error = Error> + Send>
+    ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
     where
         B: Serialize + Send + 'static,
         O: Serialize + Send + 'static,
         B2: DeserializeOwned + Send + 'static;
 
-    fn watch<B, O, B2>(&self, req: Request<B, O>) -> Box<Stream<Item = B2, Error = Error> + Send>
+    fn watch<B, O, B2>(
+        &self,
+        req: Request<B, O>,
+    ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
     where
         B: Serialize + Send + 'static,
         O: Serialize + Send + 'static,

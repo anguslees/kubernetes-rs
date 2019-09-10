@@ -1,13 +1,14 @@
 use crate::config::{self, ConfigContext, CONFIG_ENV};
-use apimachinery::client::ApiClient;
-use apimachinery::meta::v1::Status;
-use apimachinery::{HttpService, HttpUpgradeService};
 use bytes::{Bytes, BytesMut};
-use failure::{Error, ResultExt};
+use failure::{format_err, Error, ResultExt};
 use futures::{future, Future, Sink, Stream};
 use http;
 use hyper;
 use hyper_tls::HttpsConnector;
+use kubernetes_apimachinery::client::ApiClient;
+use kubernetes_apimachinery::meta::v1::Status;
+use kubernetes_apimachinery::{HttpService, HttpUpgradeService};
+use log::debug;
 use native_tls::{Certificate, Identity, TlsConnector};
 use openssl;
 use std::env;
@@ -140,9 +141,9 @@ where
     C: hyper::client::connect::Connect + 'static,
 {
     type Body = hyper::Chunk;
-    type Future = Box<Future<Item = http::Response<Self::Body>, Error = Error> + Send>;
-    type Stream = Box<Stream<Item = Self::Body, Error = Error> + Send>;
-    type StreamFuture = Box<Future<Item = http::Response<Self::Stream>, Error = Error> + Send>;
+    type Future = Box<dyn Future<Item = http::Response<Self::Body>, Error = Error> + Send>;
+    type Stream = Box<dyn Stream<Item = Self::Body, Error = Error> + Send>;
+    type StreamFuture = Box<dyn Future<Item = http::Response<Self::Stream>, Error = Error> + Send>;
 
     fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
         let hreq = req.map(|b| b.into());
@@ -174,11 +175,11 @@ impl<C> HttpUpgradeService for Client<C>
 where
     C: hyper::client::connect::Connect + 'static,
 {
-    type Sink = Box<Sink<SinkItem = Self::SinkItem, SinkError = Error> + Send>;
+    type Sink = Box<dyn Sink<SinkItem = Self::SinkItem, SinkError = Error> + Send>;
     type SinkItem = Bytes;
-    type Stream = Box<Stream<Item = Self::StreamItem, Error = Error> + Send>;
+    type Stream = Box<dyn Stream<Item = Self::StreamItem, Error = Error> + Send>;
     type StreamItem = BytesMut;
-    type Future = Box<Future<Item = (Self::Stream, Self::Sink), Error = Error> + Send>;
+    type Future = Box<dyn Future<Item = (Self::Stream, Self::Sink), Error = Error> + Send>;
 
     fn upgrade(&self, req: http::Request<()>) -> Self::Future {
         let f = self

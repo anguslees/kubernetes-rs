@@ -20,8 +20,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use serde_base64;
-    use serde_json;
+    use crate::serde_base64;
+    use serde::{Deserialize, Serialize};
+    use serde_json::{self, json};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct Test {
