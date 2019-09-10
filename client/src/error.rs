@@ -1,7 +1,8 @@
-use std::str;
-
+use failure::Fail;
 use http;
+use log::debug;
 use serde_json;
+use std::str;
 
 #[derive(Debug, Fail)]
 pub enum ClientError {
@@ -75,6 +76,8 @@ fn context(e: &serde_json::Error, body_ref: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde::{Deserialize, Serialize};
+
     #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
     #[serde(rename_all = "camelCase")]
     struct SampleObject {

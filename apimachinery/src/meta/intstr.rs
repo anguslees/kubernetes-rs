@@ -1,4 +1,5 @@
 use super::Integer;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A number serialised as either an integer or a string.
@@ -45,11 +46,11 @@ impl PartialEq<Integer> for IntOrString {
     }
 }
 
-impl PartialEq<AsRef<str>> for IntOrString {
-    fn eq(&self, other: &AsRef<str>) -> bool {
+impl PartialEq<str> for IntOrString {
+    fn eq(&self, other: &str) -> bool {
         match *self {
-            IntOrString::Int(i) => Integer::from_str_radix(other.as_ref(), 10) == Ok(i),
-            IntOrString::String(ref s) => s == other.as_ref(),
+            IntOrString::Int(i) => Integer::from_str_radix(other, 10) == Ok(i),
+            IntOrString::String(ref s) => s == other,
         }
     }
 }

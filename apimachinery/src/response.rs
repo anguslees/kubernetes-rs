@@ -1,6 +1,6 @@
 use crate::meta::v1::Status;
 use crate::request::APPLICATION_JSON;
-use failure::{Error, Fail, ResultExt};
+use failure::{bail, Error, Fail, ResultExt};
 use http;
 use http::header::{HeaderValue, CONTENT_TYPE};
 use serde::de::DeserializeOwned;
@@ -117,7 +117,7 @@ fn deser_empty() {
 
 #[test]
 fn deser_json() {
-    use serde_json::Value;
+    use serde_json::{json, Value};
     let hresp = http::Response::builder()
         .status(http::StatusCode::OK)
         .header(CONTENT_TYPE, APPLICATION_JSON)
@@ -130,6 +130,8 @@ fn deser_json() {
 
 #[test]
 fn deser_error() {
+    use serde::Deserialize;
+
     #[derive(Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct SampleObject {

@@ -1,6 +1,7 @@
 use crate::core::v1::{ConditionStatus, PodTemplateSpec};
-use apimachinery::meta::v1::{LabelSelector, ObjectMeta};
-use apimachinery::meta::{IntOrString, Integer, Time};
+use kubernetes_apimachinery::meta::v1::{LabelSelector, ObjectMeta};
+use kubernetes_apimachinery::meta::{IntOrString, Integer, Time};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]

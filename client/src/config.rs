@@ -1,5 +1,5 @@
-extern crate dirs;
-use failure::Error;
+use dirs;
+use failure::{Error, Fail};
 use serde_yaml;
 use std::fs::File;
 use std::io::{self, Read};

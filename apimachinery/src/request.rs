@@ -2,7 +2,7 @@ use crate::meta::GroupVersionResource;
 use failure::Error;
 use http;
 use http::header::{HeaderValue, ACCEPT, CONTENT_TYPE};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use serde_urlencoded;
 
@@ -129,6 +129,8 @@ where
 
 #[test]
 fn namespaced_to_http() {
+    use serde_json::json;
+
     let proxy_req = Request {
         group: "".to_string(),
         version: "v1".to_string(),
@@ -159,6 +161,8 @@ fn namespaced_to_http() {
 
 #[test]
 fn non_namespaced() {
+    use serde_json::json;
+
     let delete_req = Request {
         group: "rbac.authorization.k8s.io".to_string(),
         version: "v1".to_string(),
