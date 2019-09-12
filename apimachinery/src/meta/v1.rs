@@ -10,6 +10,9 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::sync::Once;
 
+#[cfg(feature = "derive")]
+pub use kubernetes_apimachinery_derive::Metadata;
+
 const API_GROUP: &str = "v1";
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]

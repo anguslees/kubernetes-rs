@@ -1,0 +1,23 @@
+[package]
+name = "kubernetes_apimachinery_derive"
+version = "0.2.0"
+authors = ["Angus Lees <gus@inodes.org>"]
+description = "Custom derive macros for kubernetes_apimachinery"
+repository = "https://github.com/anguslees/kubernetes-rs"
+keywords = ["kubernetes"]
+categories = ["api-bindings", "derive"]
+license = "Apache-2.0"
+edition = "2018"
+
+[badges]
+maintenance = {status = "actively-developed,experimental"}
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "0.14"
+quote = "0.6"
+
+[dev-dependencies]
+kubernetes_apimachinery = { path = "../apimachinery" }

@@ -70,7 +70,7 @@ struct ParseHeaders<'a> {
     iter: pest::iterators::Pairs<'a, Rule>,
 }
 
-impl<'a> Iterator for ParseHeaders<'a> where {
+impl<'a> Iterator for ParseHeaders<'a> {
     type Item = v1_3::Headers;
 
     fn next(&mut self) -> Option<v1_3::Headers> {

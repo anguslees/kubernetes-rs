@@ -8,14 +8,13 @@ use kubernetes_apimachinery::meta::v1::{
 };
 use kubernetes_apimachinery::meta::{
     GroupVersion, GroupVersionResource, IntOrString, Integer, NamespaceScope, Quantity, Resource,
-    Time, TypeMeta, TypeMetaImpl,
+    ResourceScope, Time, TypeMetaImpl,
 };
 use kubernetes_apimachinery::request::{Request, APPLICATION_JSON};
 use kubernetes_apimachinery::response::Response;
 use kubernetes_apimachinery::{ApiService, HttpService, HttpUpgradeService};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Map, Value};
-use std::borrow::Cow;
 use std::default::Default;
 
 // TODO(gus): Uses of serde_json::{Map,Value} below are probably incorrect.
@@ -268,7 +267,7 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Metadata)]
 #[serde(rename_all = "camelCase")]
 pub struct Namespace {
     #[serde(flatten)]
@@ -282,27 +281,6 @@ pub struct Namespace {
 }
 
 pub type NamespaceList = ItemList<Namespace>;
-
-impl TypeMeta for Namespace {
-    fn api_version() -> &'static str {
-        API_GROUP
-    }
-    fn kind() -> &'static str {
-        "Namespace"
-    }
-}
-
-impl Metadata for Namespace {
-    fn api_version(&self) -> &str {
-        <Namespace as TypeMeta>::api_version()
-    }
-    fn kind(&self) -> &str {
-        <Namespace as TypeMeta>::kind()
-    }
-    fn metadata(&self) -> Cow<ObjectMeta> {
-        Cow::Borrowed(&self.metadata)
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -325,7 +303,7 @@ pub enum NamespacePhase {
     Terminating,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Metadata)]
 #[serde(rename_all = "camelCase")]
 pub struct Pod {
     #[serde(flatten)]
@@ -339,27 +317,6 @@ pub struct Pod {
 }
 
 pub type PodList = ItemList<Pod>;
-
-impl TypeMeta for Pod {
-    fn api_version() -> &'static str {
-        API_GROUP
-    }
-    fn kind() -> &'static str {
-        "Pod"
-    }
-}
-
-impl Metadata for Pod {
-    fn api_version(&self) -> &str {
-        <Pod as TypeMeta>::api_version()
-    }
-    fn kind(&self) -> &str {
-        <Pod as TypeMeta>::kind()
-    }
-    fn metadata(&self) -> Cow<ObjectMeta> {
-        Cow::Borrowed(&self.metadata)
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
