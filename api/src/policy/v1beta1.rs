@@ -1,7 +1,6 @@
 use kubernetes_apimachinery::meta::v1::{DeleteOptions, Metadata, ObjectMeta};
-use kubernetes_apimachinery::meta::{GroupVersion, TypeMeta, TypeMetaImpl};
+use kubernetes_apimachinery::meta::{GroupVersion, TypeMetaImpl};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 const API_GROUP: &str = "policy/v1beta1";
 pub const GROUP_VERSION: GroupVersion = GroupVersion {
@@ -9,7 +8,7 @@ pub const GROUP_VERSION: GroupVersion = GroupVersion {
     version: "v1beta1",
 };
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Metadata)]
 #[serde(rename_all = "camelCase")]
 pub struct Eviction {
     #[serde(flatten)]
@@ -18,25 +17,4 @@ pub struct Eviction {
     pub metadata: ObjectMeta,
     #[serde(default)]
     pub delete_options: DeleteOptions,
-}
-
-impl TypeMeta for Eviction {
-    fn api_version() -> &'static str {
-        API_GROUP
-    }
-    fn kind() -> &'static str {
-        "Eviction"
-    }
-}
-
-impl Metadata for Eviction {
-    fn api_version(&self) -> &str {
-        <Eviction as TypeMeta>::api_version()
-    }
-    fn kind(&self) -> &str {
-        <Eviction as TypeMeta>::kind()
-    }
-    fn metadata(&self) -> Cow<ObjectMeta> {
-        Cow::Borrowed(&self.metadata)
-    }
 }
