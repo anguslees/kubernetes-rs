@@ -1,4 +1,4 @@
-use crate::meta::GroupVersionResource;
+use crate::meta::{GroupVersionResource, ResourceScope};
 use failure::Error;
 use http;
 use http::header::{HeaderValue, ACCEPT, CONTENT_TYPE};
@@ -29,7 +29,7 @@ impl Patch {
 }
 
 #[derive(Debug)]
-pub struct Request<B, O> {
+pub struct Request<Body, Opt> {
     pub group: String,
     pub version: String,
     pub resource: String,
@@ -37,12 +37,12 @@ pub struct Request<B, O> {
     pub name: Option<String>,
     pub subresource: Option<String>,
     pub method: http::Method,
-    pub opts: O,
+    pub opts: Opt,
     pub content_type: Option<&'static str>,
-    pub body: B,
+    pub body: Body,
 }
 
-impl<B, O> Request<B, O> {
+impl<Body, Opt> Request<Body, Opt> {
     pub fn gvr(&self) -> GroupVersionResource {
         GroupVersionResource {
             group: &self.group,
@@ -52,15 +52,15 @@ impl<B, O> Request<B, O> {
     }
 }
 
-pub fn url_path<O>(
+pub fn url_path<Opt>(
     gvr: &GroupVersionResource,
     namespace: Option<&str>,
     name: Option<&str>,
     subresource: Option<&str>,
-    opts: O,
+    opts: Opt,
 ) -> String
 where
-    O: Serialize,
+    Opt: Serialize,
 {
     let gv = gvr.as_gv();
     let mut components = vec![""];
@@ -91,10 +91,10 @@ where
     path
 }
 
-impl<B, O> Request<B, O>
+impl<Body, Opt> Request<Body, Opt>
 where
-    B: Serialize,
-    O: Serialize,
+    Body: Serialize,
+    Opt: Serialize,
 {
     pub fn url_path(&self) -> String {
         url_path(
@@ -124,6 +124,162 @@ where
         };
 
         req.map_err(|e| e.into())
+    }
+}
+
+#[derive(Debug)]
+pub struct Builder<Body, Opt> {
+    group: String,
+    version: String,
+    resource: String,
+    namespace: Option<String>,
+    name: Option<String>,
+    subresource: Option<String>,
+    method: http::Method,
+    opts: Opt,
+    content_type: Option<&'static str>,
+    body: Body,
+}
+
+impl Request<(), ()> {
+    pub fn builder(gvr: GroupVersionResource) -> Builder<(), ()> {
+        Builder {
+            group: gvr.group.to_string(),
+            version: gvr.version.to_string(),
+            resource: gvr.resource.to_string(),
+            subresource: None,
+            namespace: None,
+            name: None,
+            method: http::Method::GET,
+            opts: (),
+            content_type: None,
+            body: (),
+        }
+    }
+}
+
+/// A `Request` builder.
+///
+/// # Example
+///
+/// ```rust
+/// use kubernetes_apimachinery::request::Request;
+/// use kubernetes_apimachinery::meta::v1::GetOptions;
+/// # use kubernetes_apimachinery::meta::GroupVersionResource;
+/// # struct Service;
+/// # impl Service {
+/// #   fn gvr() -> GroupVersionResource<'static> {
+/// #     GroupVersionResource {
+/// #       group: "",
+/// #       version: "v1",
+/// #       resource: "services",
+/// #     }
+/// #   }
+/// # }
+///
+/// let req = Request::builder(Service::gvr())
+///     .namespace("default")
+///     .name("kubernetes")
+///     .opts(GetOptions{
+///         resource_version: "xyz".to_string(),
+///         ..Default::default()
+///     })
+///     .build();
+///
+/// assert_eq!(req.method, http::Method::GET);
+/// assert_eq!(
+///     req.url_path(),
+///     "/api/v1/namespaces/default/services/kubernetes?resourceVersion=xyz",
+/// );
+/// ```
+impl<Body, Opt> Builder<Body, Opt> {
+    pub fn build(self) -> Request<Body, Opt> {
+        Request {
+            group: self.group,
+            version: self.version,
+            resource: self.resource,
+            namespace: self.namespace,
+            name: self.name,
+            subresource: self.subresource,
+            method: self.method,
+            opts: self.opts,
+            content_type: self.content_type,
+            body: self.body,
+        }
+    }
+
+    pub fn namespace(mut self, ns: impl Into<String>) -> Self {
+        self.namespace = Some(ns.into());
+        self
+    }
+
+    pub fn namespace_maybe(mut self, ns: Option<impl Into<String>>) -> Self {
+        self.namespace = ns.map(|inner| inner.into());
+        self
+    }
+
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn name_maybe(mut self, name: Option<impl Into<String>>) -> Self {
+        self.name = name.map(|inner| inner.into());
+        self
+    }
+
+    pub fn scope(mut self, name: impl ResourceScope) -> Self {
+        self.namespace = name.namespace().map(|s| s.to_string());
+        self.name = name.name().map(|s| s.to_string());
+        self
+    }
+
+    pub fn method(mut self, method: http::Method) -> Self {
+        self.method = method;
+        self
+    }
+
+    pub fn subresource(mut self, sub: impl Into<String>) -> Self {
+        self.subresource = Some(sub.into());
+        self
+    }
+
+    pub fn opts<O>(self, opts: O) -> Builder<Body, O> {
+        Builder {
+            group: self.group,
+            version: self.version,
+            resource: self.resource,
+            namespace: self.namespace,
+            name: self.name,
+            subresource: self.subresource,
+            method: self.method,
+            opts: opts,
+            content_type: self.content_type,
+            body: self.body,
+        }
+    }
+
+    pub fn body<B>(self, content_type: &'static str, body: B) -> Builder<B, Opt> {
+        Builder {
+            group: self.group,
+            version: self.version,
+            resource: self.resource,
+            namespace: self.namespace,
+            name: self.name,
+            subresource: self.subresource,
+            method: self.method,
+            opts: self.opts,
+            content_type: Some(content_type),
+            body: body,
+        }
+    }
+
+    pub fn opts_mut(&mut self) -> &mut Opt {
+        &mut self.opts
+    }
+
+    pub fn body_mut(&mut self) -> &mut Body {
+        &mut self.body
     }
 }
 
