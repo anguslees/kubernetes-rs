@@ -499,6 +499,21 @@ pub trait ResourceScope {
     fn namespace(&self) -> Option<&str>;
 }
 
+impl<T> ResourceScope for &T
+where
+    T: ResourceScope,
+{
+    fn url_segments(&self) -> Vec<&str> {
+        (**self).url_segments()
+    }
+    fn name(&self) -> Option<&str> {
+        (**self).name()
+    }
+    fn namespace(&self) -> Option<&str> {
+        (**self).namespace()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum NamespaceScope {
     Cluster,

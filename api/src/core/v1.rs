@@ -8,7 +8,7 @@ use kubernetes_apimachinery::meta::v1::{
 };
 use kubernetes_apimachinery::meta::{
     GroupVersion, GroupVersionResource, IntOrString, Integer, NamespaceScope, Quantity, Resource,
-    ResourceScope, Time, TypeMeta, TypeMetaImpl,
+    Time, TypeMeta, TypeMetaImpl,
 };
 use kubernetes_apimachinery::request::{Request, APPLICATION_JSON};
 use kubernetes_apimachinery::response::Response;
@@ -32,7 +32,7 @@ fn is_default<T: Default + PartialEq>(v: &T) -> bool {
 
 pub struct Pods;
 impl Pods {
-    fn gvr() -> GroupVersionResource<'static> {
+    pub fn gvr() -> GroupVersionResource<'static> {
         GROUP_VERSION.with_resource("pods")
     }
 }
@@ -186,19 +186,12 @@ where
         name: &<Pods as Resource>::Scope,
         opts: PodLogOptions,
     ) -> Box<dyn Future<Item = ByteStream, Error = Error> + Send> {
-        let gvr = Pods::gvr();
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: name.namespace().map(|s| s.to_string()),
-            name: name.name().map(|s| s.to_string()),
-            subresource: Some("logs".to_string()),
-            method: Method::GET,
-            opts: opts,
-            content_type: None,
-            body: (),
-        };
+        let req = Request::builder(Pods::gvr())
+            .scope(name)
+            .subresource("logs")
+            .method(Method::GET)
+            .opts(opts)
+            .build();
 
         let r = match req.into_http_request(self.api_client().base_url()) {
             Ok(r) => r.map(|_| ()),
@@ -258,20 +251,13 @@ where
         value: Eviction,
         opts: CreateOptions,
     ) -> Box<dyn Future<Item = Eviction, Error = Error> + Send> {
-        let gvr = Pods::gvr();
-
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: name.namespace().map(|s| s.to_string()),
-            name: name.name().map(|s| s.to_string()),
-            subresource: Some("eviction".to_string()),
-            method: Method::POST,
-            opts: opts,
-            content_type: Some(APPLICATION_JSON),
-            body: value,
-        };
+        let req = Request::builder(Pods::gvr())
+            .scope(name)
+            .subresource("eviction")
+            .method(Method::POST)
+            .opts(opts)
+            .body(APPLICATION_JSON, value)
+            .build();
 
         let result = self
             .api_client()

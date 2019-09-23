@@ -1,7 +1,7 @@
 use crate::meta::v1::{
     DeleteOptions, GetOptions, List, ListOptions, Metadata, Status, UpdateOptions, WatchEvent,
 };
-use crate::meta::{Resource, ResourceScope};
+use crate::meta::{GroupVersionResource, Resource, ResourceScope};
 use crate::request::{Patch, Request, APPLICATION_JSON};
 use crate::resplit;
 use crate::response::{DecodeError, Response};
@@ -209,19 +209,12 @@ where
         name: &R::Scope,
         opts: GetOptions,
     ) -> impl Future<Item = R::Item, Error = Error> + Send {
-        let gvr = self.resource.gvr();
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: name.namespace().map(|s| s.to_string()),
-            name: name.name().map(|s| s.to_string()),
-            subresource: None,
-            method: Method::GET,
-            opts: opts,
-            content_type: None,
-            body: (),
-        };
+        let req = Request::builder(self.resource.gvr())
+            .scope(name)
+            .method(Method::GET)
+            .opts(opts)
+            .build();
+
         self.api_client()
             .request(req)
             .map(|resp: Response<_>| resp.into_body())
@@ -236,20 +229,14 @@ where
             let metadata = value.metadata();
             metadata.namespace.clone()
         };
-        let gvr = self.resource.gvr();
 
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: ns,
-            name: None,
-            subresource: None,
-            method: Method::POST,
-            opts: opts,
-            content_type: Some(APPLICATION_JSON),
-            body: value,
-        };
+        let req = Request::builder(self.resource.gvr())
+            .namespace_maybe(ns)
+            .method(Method::POST)
+            .opts(opts)
+            .body(APPLICATION_JSON, value)
+            .build();
+
         self.api_client()
             .request(req)
             .map(|resp: Response<_>| resp.into_body())
@@ -260,24 +247,19 @@ where
         value: R::Item,
         opts: UpdateOptions,
     ) -> impl Future<Item = R::Item, Error = Error> + Send {
-        let gvr = self.resource.gvr();
         let (ns, name) = {
             let md = value.metadata();
             (md.namespace.clone(), md.name.clone())
         };
 
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: ns,
-            name: name,
-            subresource: None,
-            method: Method::PUT,
-            opts: opts,
-            content_type: Some(APPLICATION_JSON),
-            body: value,
-        };
+        let req = Request::builder(self.resource.gvr())
+            .name_maybe(name)
+            .namespace_maybe(ns)
+            .method(Method::PUT)
+            .opts(opts)
+            .body(APPLICATION_JSON, value)
+            .build();
+
         self.api_client()
             .request(req)
             .map(|resp: Response<_>| resp.into_body())
@@ -289,20 +271,13 @@ where
         patch: Patch,
         opts: UpdateOptions,
     ) -> impl Future<Item = R::Item, Error = Error> + Send {
-        let gvr = self.resource.gvr();
+        let req = Request::builder(self.resource.gvr())
+            .scope(name)
+            .method(Method::PATCH)
+            .opts(opts)
+            .body(patch.content_type(), patch)
+            .build();
 
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: name.namespace().map(|s| s.to_string()),
-            name: name.name().map(|s| s.to_string()),
-            subresource: None,
-            method: Method::PATCH,
-            opts: opts,
-            content_type: Some(patch.content_type()),
-            body: patch,
-        };
         self.api_client()
             .request(req)
             .map(|resp: Response<_>| resp.into_body())
@@ -313,20 +288,12 @@ where
         name: R::Scope,
         opts: DeleteOptions,
     ) -> impl Future<Item = (), Error = Error> + Send {
-        let gvr = self.resource.gvr();
+        let req = Request::builder(self.resource.gvr())
+            .scope(name)
+            .method(Method::DELETE)
+            .opts(opts)
+            .build();
 
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: name.namespace().map(|s| s.to_string()),
-            name: name.name().map(|s| s.to_string()),
-            subresource: None,
-            method: Method::DELETE,
-            opts: opts,
-            content_type: None,
-            body: (),
-        };
         self.api_client()
             .request(req)
             .map(|resp: Response<_>| resp.into_body())
@@ -342,19 +309,12 @@ where
         // metadata.name filter to handle this single-item list (or
         // watch) case.
 
-        let gvr = self.resource.gvr();
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: name.namespace().map(|s| s.to_string()),
-            name: name.name().map(|s| s.to_string()), // NB: see note above
-            subresource: None,
-            method: Method::GET,
-            opts: opts,
-            content_type: None,
-            body: (),
-        };
+        let req = Request::builder(self.resource.gvr())
+            .scope(name) // NB: see note above
+            .method(Method::GET)
+            .opts(opts)
+            .build();
+
         self.api_client()
             .request(req)
             .map(move |resp: Response<_>| resp.into_body())
@@ -378,19 +338,18 @@ where
         let client = self.api_client().clone();
 
         let fetch_pages = stream::unfold(Some((client, gvr, ns, opts)), |maybe_args| {
-            maybe_args.map(|(client, gvr, ns, mut opts)| {
-                let req = Request {
-                    group: gvr.0.clone(),
-                    version: gvr.1.clone(),
-                    resource: gvr.2.clone(),
-                    namespace: ns.clone(),
-                    name: None,
-                    subresource: None,
-                    method: Method::GET,
-                    opts: opts.clone(),
-                    content_type: None,
-                    body: (),
+            maybe_args.map(|(client, gvr_tuple, ns, mut opts)| {
+                let gvr = GroupVersionResource {
+                    group: &gvr_tuple.0,
+                    version: &gvr_tuple.1,
+                    resource: &gvr_tuple.2,
                 };
+                let req = Request::builder(gvr)
+                    .namespace_maybe(ns.clone())
+                    .method(Method::GET)
+                    .opts(opts.clone())
+                    .build();
+
                 client.request(req).map(move |resp: Response<R::List>| {
                     let page = resp.into_body();
                     let maybe_next = page
@@ -400,7 +359,7 @@ where
                         .filter(|c| !c.is_empty())
                         .map(|c| {
                             opts.continu = c.to_string();
-                            (client, gvr, ns, opts)
+                            (client, gvr_tuple, ns, opts)
                         });
                     (page, maybe_next)
                 })
@@ -417,20 +376,13 @@ where
         name: &R::Scope, // FIXME: wrong!
         mut opts: ListOptions,
     ) -> impl Stream<Item = WatchEvent<R::Item>, Error = Error> + Send {
-        let gvr = self.resource.gvr();
         opts.watch = true;
-        let req = Request {
-            group: gvr.group.to_string(),
-            version: gvr.version.to_string(),
-            resource: gvr.resource.to_string(),
-            namespace: name.namespace().map(|s| s.to_string()),
-            name: None,
-            subresource: None,
-            method: Method::GET,
-            opts: opts,
-            content_type: None,
-            body: (),
-        };
+        let req = Request::builder(self.resource.gvr())
+            .scope(name)
+            .method(Method::GET)
+            .opts(opts)
+            .build();
+
         self.api_client().watch(req)
     }
 }
