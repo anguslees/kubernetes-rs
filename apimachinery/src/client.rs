@@ -1,14 +1,17 @@
 use crate::meta::v1::{
     DeleteOptions, GetOptions, List, ListOptions, Metadata, Status, UpdateOptions, WatchEvent,
 };
-use crate::meta::{GroupVersionResource, Resource, ResourceScope};
+use crate::meta::{Resource, ResourceScope};
 use crate::request::{Patch, Request, APPLICATION_JSON};
-use crate::resplit;
 use crate::response::{DecodeError, Response};
 use crate::{ApiService, HttpService};
-use failure::Error;
-use failure::ResultExt;
-use futures::{self, future, stream, Future, Stream};
+use async_stream::try_stream;
+use async_trait::async_trait;
+use failure::{Error, ResultExt};
+use futures::future::TryFutureExt;
+use futures::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use futures::pin_mut;
+use futures::stream::{BoxStream, Stream, TryStream, TryStreamExt};
 use http::header::{HeaderMap, HeaderValue, ValueIter, CONTENT_LENGTH};
 use http::{self, Method};
 use log::debug;
@@ -34,9 +37,6 @@ impl<C> ApiClient<C> {
 impl<C> ApiClient<C>
 where
     C: HttpService + Send + Sync,
-    C::Future: 'static,
-    C::Stream: 'static,
-    C::StreamFuture: 'static,
 {
     pub fn base_url(&self) -> &str {
         &self.base_url
@@ -46,137 +46,96 @@ where
         &self.http_client
     }
 
-    pub fn resource<R>(&self, rsrc: R) -> ResourceClient<Self, R>
+    pub fn resource<'a, R>(&'a self, rsrc: R) -> ResourceClient<&'a Self, R>
     where
         R: Resource,
-        Self: Clone,
     {
         ResourceClient {
-            api_client: self.clone(),
+            api_client: self,
             resource: rsrc,
         }
     }
 }
 
-impl<'a, C: ?Sized + ApiService> ApiService for &'a C {
-    fn request<B, O, B2>(
-        &self,
-        req: Request<B, O>,
-    ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
+#[async_trait]
+impl<C: ?Sized + ApiService + Send + Sync> ApiService for &C {
+    async fn request<B, O, B2>(&self, req: Request<B, O>) -> Result<Response<B2>, Error>
     where
-        B: Serialize + Send + 'static,
-        O: Serialize + Send + 'static,
+        B: Serialize + Send + 'async_trait,
+        O: Serialize + Send + 'async_trait,
         B2: DeserializeOwned + Send + 'static,
     {
-        (**self).request(req)
+        (**self).request(req).await
     }
 
-    fn watch<B, O, B2>(
-        &self,
-        req: Request<B, O>,
-    ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
+    fn watch<'a, B, O, B2>(&'a self, req: Request<B, O>) -> BoxStream<'a, Result<B2, Error>>
     where
-        B: Serialize + Send + 'static,
-        O: Serialize + Send + 'static,
-        B2: DeserializeOwned + Send + 'static,
+        B: Serialize + Send + 'a,
+        O: Serialize + Send + 'a,
+        B2: DeserializeOwned + Send + Unpin + 'static,
     {
         (**self).watch(req)
     }
 }
 
+#[async_trait]
 impl<C> ApiService for ApiClient<C>
 where
     C: HttpService + Send + Sync,
-    C::Future: 'static,
-    C::Stream: 'static,
-    C::StreamFuture: 'static,
 {
-    fn request<B, O, B2>(
-        &self,
-        req: Request<B, O>,
-    ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
+    async fn request<B, O, B2>(&self, req: Request<B, O>) -> Result<Response<B2>, Error>
     where
-        B: Serialize + Send + 'static,
-        O: Serialize + Send + 'static,
+        B: Serialize + Send + 'async_trait,
+        O: Serialize + Send + 'async_trait,
         B2: DeserializeOwned + Send + 'static,
     {
-        let r = match req.into_http_request(self.base_url()) {
-            Ok(r) => r,
-            Err(e) => return Box::new(futures::future::err(e)),
-        };
-
-        let f = self
-            .http_client
-            .request(r)
-            .and_then(|resp: http::Response<C::Body>| {
-                // Deserialize body
-                Response::from_http_response(resp).map_err(|e| e.into())
-            });
-        Box::new(f)
+        let r = req.into_http_request(self.base_url())?;
+        let http_resp = self.http_client.request(r).await?;
+        let resp = Response::from_http_response(http_resp)?;
+        Ok(resp)
     }
 
-    fn watch<B, O, B2>(
-        &self,
-        req: Request<B, O>,
-    ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
+    fn watch<'a, B, O, B2>(&'a self, req: Request<B, O>) -> BoxStream<'a, Result<B2, Error>>
     where
-        B: Serialize + Send + 'static,
-        O: Serialize + Send + 'static,
-        B2: DeserializeOwned + Send + 'static,
+        B: Serialize + Send + 'a,
+        O: Serialize + Send + 'a,
+        B2: DeserializeOwned + Send + Unpin + 'static,
     {
-        let r = match req.into_http_request(self.base_url()) {
-            Ok(r) => r,
-            Err(e) => return Box::new(stream::once(Err(e))),
+        let s = try_stream! {
+            let base_url = self.base_url();
+            let r = req.into_http_request(base_url)?;
+            let resp = self.http_client.watch(r).await?;
+
+            if ! resp.status().is_success() {
+                // HTTP error (ie: not 2xx)
+
+                // Pre-allocate buffer based on content-length, if
+                // provided.
+                let con_len =
+                    content_length_parse_all(resp.headers()).and_then(|n| usize::try_from(n).ok());
+                let mut buf = Vec::with_capacity(con_len.unwrap_or(0));
+                let body = resp.into_body();
+                pin_mut!(body);
+                body.read_to_end(&mut buf).map_err(Error::from).await?;
+
+                let status = Status::from_vec(buf)?;
+                Err(Error::from(status))?;
+                unreachable!();
+            }
+
+            // HTTP 2xx response
+            let stream = BufReader::new(resp.into_body())
+                .lines();
+            pin_mut!(stream);
+            while let Some(line) = stream.try_next().map_err(Error::from).await? {
+                debug!("Watch response: {:#?}", line);
+                let parsed: B2 = serde_json::from_str(&line)
+                    .with_context(|e| DecodeError::new(e, line.into())).map_err(Error::from)?;
+                yield parsed;
+            }
         };
 
-        let s = self
-            .http_client
-            .watch(r)
-            .and_then(|resp: http::Response<C::Stream>| {
-                let httpstatus = resp.status();
-                let r = if httpstatus.is_success() {
-                    Ok(resp)
-                } else {
-                    Err(resp)
-                };
-                future::result(r).or_else(|res| {
-                    let con_len = content_length_parse_all(res.headers())
-                        .and_then(|n| usize::try_from(n).ok());
-                    res.into_body()
-                        .map(move |b| {
-                            // Pre-allocate buffer based on
-                            // content-length, if provided
-                            if let Some(n) = con_len {
-                                let mut v = Vec::with_capacity(n);
-                                v.extend(b.as_ref());
-                                v
-                            } else {
-                                b.as_ref().to_vec()
-                            }
-                        })
-                        .concat2()
-                        .from_err::<Error>()
-                        .and_then(|body| {
-                            let status = Status::from_vec(body.to_vec())?;
-                            Err(status.into())
-                        })
-                })
-            })
-            .map(|resp: http::Response<C::Stream>| {
-                resplit::new(resp.into_body(), |&c| c == b'\n')
-                    .from_err()
-                    .inspect(|line| {
-                        debug!("Watch response: {:#?}", line);
-                    })
-                    .and_then(|line| {
-                        let parsed = serde_json::from_slice(&line)
-                            .with_context(|e| DecodeError::new(e, line))?;
-                        Ok(parsed)
-                    })
-            })
-            .flatten_stream();
-
-        Box::new(s)
+        Box::pin(s)
     }
 }
 
@@ -204,11 +163,7 @@ where
     C: ApiService + Send + Sync + Clone,
     R: Resource,
 {
-    pub fn get(
-        &self,
-        name: &R::Scope,
-        opts: GetOptions,
-    ) -> impl Future<Item = R::Item, Error = Error> + Send {
+    pub async fn get(&self, name: &R::Scope, opts: GetOptions) -> Result<R::Item, Error> {
         let req = Request::builder(self.resource.gvr())
             .scope(name)
             .method(Method::GET)
@@ -217,14 +172,11 @@ where
 
         self.api_client()
             .request(req)
-            .map(|resp: Response<_>| resp.into_body())
+            .await
+            .map(Response::into_body)
     }
 
-    pub fn create(
-        &self,
-        value: R::Item,
-        opts: GetOptions,
-    ) -> impl Future<Item = R::Item, Error = Error> + Send {
+    pub async fn create(&self, value: R::Item, opts: GetOptions) -> Result<R::Item, Error> {
         let ns = {
             let metadata = value.metadata();
             metadata.namespace.clone()
@@ -239,14 +191,11 @@ where
 
         self.api_client()
             .request(req)
-            .map(|resp: Response<_>| resp.into_body())
+            .await
+            .map(Response::into_body)
     }
 
-    pub fn update(
-        &self,
-        value: R::Item,
-        opts: UpdateOptions,
-    ) -> impl Future<Item = R::Item, Error = Error> + Send {
+    pub async fn update(&self, value: R::Item, opts: UpdateOptions) -> Result<R::Item, Error> {
         let (ns, name) = {
             let md = value.metadata();
             (md.namespace.clone(), md.name.clone())
@@ -262,15 +211,16 @@ where
 
         self.api_client()
             .request(req)
-            .map(|resp: Response<_>| resp.into_body())
+            .await
+            .map(Response::into_body)
     }
 
-    pub fn patch(
+    pub async fn patch(
         &self,
         name: R::Scope,
         patch: Patch,
         opts: UpdateOptions,
-    ) -> impl Future<Item = R::Item, Error = Error> + Send {
+    ) -> Result<R::Item, Error> {
         let req = Request::builder(self.resource.gvr())
             .scope(name)
             .method(Method::PATCH)
@@ -280,14 +230,11 @@ where
 
         self.api_client()
             .request(req)
-            .map(|resp: Response<_>| resp.into_body())
+            .await
+            .map(Response::into_body)
     }
 
-    pub fn delete(
-        &self,
-        name: R::Scope,
-        opts: DeleteOptions,
-    ) -> impl Future<Item = (), Error = Error> + Send {
+    pub async fn delete(&self, name: R::Scope, opts: DeleteOptions) -> Result<R::Item, Error> {
         let req = Request::builder(self.resource.gvr())
             .scope(name)
             .method(Method::DELETE)
@@ -296,14 +243,11 @@ where
 
         self.api_client()
             .request(req)
-            .map(|resp: Response<_>| resp.into_body())
+            .await
+            .map(Response::into_body)
     }
 
-    pub fn list(
-        &self,
-        name: &R::Scope,
-        opts: ListOptions,
-    ) -> impl Future<Item = R::List, Error = Error> + Send {
+    pub async fn list(&self, name: &R::Scope, opts: ListOptions) -> Result<R::List, Error> {
         // R::Scope is ~wrong - should be only namespace or empty.
         // FIXME: Convert list(name) into list(collection) with
         // metadata.name filter to handle this single-item list (or
@@ -317,65 +261,63 @@ where
 
         self.api_client()
             .request(req)
-            .map(move |resp: Response<_>| resp.into_body())
+            .await
+            .map(Response::into_body)
     }
 
-    pub fn iter(
-        &self,
-        name: &R::Scope, // FIXME: see note on list()
-        opts: ListOptions,
-    ) -> impl Stream<Item = R::Item, Error = Error> + Send {
-        let gvr = {
-            // TODO: add an owned version of GroupVersionResource
-            let gvr = self.resource.gvr();
-            (
-                gvr.group.to_string(),
-                gvr.version.to_string(),
-                gvr.resource.to_string(),
-            )
-        };
-        let ns = name.namespace().map(|s| s.to_string());
-        let client = self.api_client().clone();
+    pub fn iter<'a>(
+        &'a self,
+        name: &'a R::Scope, // FIXME: see note on list()
+        mut opts: ListOptions,
+    ) -> impl TryStream<Ok = R::Item, Error = Error> + 'a
+    where
+        R::List: Unpin,
+        R::Item: Unpin,
+    {
+        let pages = try_stream! {
+            let ns = name.namespace();
+            let client = self.api_client();
 
-        let fetch_pages = stream::unfold(Some((client, gvr, ns, opts)), |maybe_args| {
-            maybe_args.map(|(client, gvr_tuple, ns, mut opts)| {
-                let gvr = GroupVersionResource {
-                    group: &gvr_tuple.0,
-                    version: &gvr_tuple.1,
-                    resource: &gvr_tuple.2,
-                };
-                let req = Request::builder(gvr)
-                    .namespace_maybe(ns.clone())
+            loop {
+                let req = Request::builder(self.resource.gvr())
+                    .namespace_maybe(ns)
                     .method(Method::GET)
                     .opts(opts.clone())
                     .build();
 
-                client.request(req).map(move |resp: Response<R::List>| {
-                    let page = resp.into_body();
-                    let maybe_next = page
-                        .listmeta()
-                        .continu
-                        .as_ref()
-                        .filter(|c| !c.is_empty())
-                        .map(|c| {
-                            opts.continu = c.to_string();
-                            (client, gvr_tuple, ns, opts)
-                        });
-                    (page, maybe_next)
-                })
-            })
-        });
+                let resp: Response<R::List> = client.request(req).await?;
 
-        fetch_pages
-            .map(|page| stream::iter_ok(page.into_items().into_iter()))
-            .flatten()
+                let page = resp.into_body();
+                opts.continu = page.listmeta().continu.clone().unwrap_or_default();
+
+                yield page;
+
+                if opts.continu.is_empty() {
+                    break;
+                }
+            }
+        };
+
+        let s = try_stream! {
+            pin_mut!(pages);
+            while let Some(page) = pages.try_next().await? {
+                for item in page.into_items() {
+                    yield item;
+                }
+            }
+        };
+
+        Box::pin(s)
     }
 
-    pub fn watch(
-        &self,
-        name: &R::Scope, // FIXME: wrong!
+    pub fn watch<'a>(
+        &'a self,
+        name: &'a R::Scope, // FIXME: wrong!
         mut opts: ListOptions,
-    ) -> impl Stream<Item = WatchEvent<R::Item>, Error = Error> + Send {
+    ) -> impl Stream<Item = Result<WatchEvent<R::Item>, Error>> + Send + 'a
+    where
+        R::Item: Unpin + 'static,
+    {
         opts.watch = true;
         let req = Request::builder(self.resource.gvr())
             .scope(name)
@@ -392,7 +334,6 @@ mod test {
     use super::*;
     use crate::meta::v1::{ItemList, Metadata, ObjectMeta};
     use crate::meta::{GroupVersionResource, NamespaceScope, TypeMeta, TypeMetaImpl};
-    use futures::IntoFuture;
     use serde::{Deserialize, Serialize};
     use std::borrow::Cow;
 
@@ -459,7 +400,7 @@ mod test {
     struct TestClient;
 
     impl TestClient {
-        pub fn resource<R>(&self, rsrc: R) -> ResourceClient<&Self, R>
+        pub fn resource<'a, R>(&'a self, rsrc: R) -> ResourceClient<&'a Self, R>
         where
             R: Resource,
         {
@@ -470,17 +411,15 @@ mod test {
         }
     }
 
+    #[async_trait]
     impl ApiService for TestClient {
-        fn request<B, O, B2>(
-            &self,
-            req: Request<B, O>,
-        ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
+        async fn request<B, O, B2>(&self, req: Request<B, O>) -> Result<Response<B2>, Error>
         where
-            B: Serialize + Send + 'static,
-            O: Serialize + Send + 'static,
+            B: Serialize + Send + 'async_trait,
+            O: Serialize + Send + 'async_trait,
             B2: DeserializeOwned + Send + 'static,
         {
-            let result = match req.method {
+            let resp_body = match req.method {
                 Method::GET => match (
                     req.group.as_str(),
                     req.version.as_str(),
@@ -498,57 +437,58 @@ mod test {
                             foo: "bar".to_string(),
                             ..Default::default()
                         };
-                        try_convert(obj)
+                        try_convert(obj)?
                     }
-                    _ => Err(failure::err_msg("Unknown resource")),
+                    _ => Err(failure::err_msg("Unknown resource"))?,
                 },
-                _ => Err(failure::err_msg("Unimplemented method")),
+                _ => Err(failure::err_msg("Unimplemented method"))?,
             };
-            Box::new(result.map(Response::ok).into_future())
+            Ok(Response::ok(resp_body))
         }
 
-        fn watch<B, O, B2>(
-            &self,
-            req: Request<B, O>,
-        ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
+        fn watch<'a, B, O, B2>(&'a self, req: Request<B, O>) -> BoxStream<'a, Result<B2, Error>>
         where
-            B: Serialize + Send + 'static,
-            O: Serialize + Send + 'static,
-            B2: DeserializeOwned + Send + 'static,
+            B: Serialize + Send + 'a,
+            O: Serialize + Send + 'a,
+            B2: DeserializeOwned + Send + Unpin + 'static,
         {
-            let results = match req.method {
-                Method::GET => match (
-                    req.group.as_str(),
-                    req.version.as_str(),
-                    req.resource.as_str(),
-                    req.namespace.as_ref().map(|s| s.as_str()),
-                    req.name.as_ref().map(|s| s.as_str()),
-                ) {
-                    ("test", "v1", "foos", Some("default"), None) => vec![
-                        try_convert(WatchEvent::Added(Foo {
-                            metadata: ObjectMeta {
-                                namespace: Some("default".to_string()),
-                                name: Some("myfoo".to_string()),
+            let s = try_stream! {
+                match req.method {
+                    Method::GET => match (
+                        req.group.as_str(),
+                        req.version.as_str(),
+                        req.resource.as_str(),
+                        req.namespace.as_ref().map(|s| s.as_str()),
+                        req.name.as_ref().map(|s| s.as_str()),
+                    ) {
+                        ("test", "v1", "foos", Some("default"), None) => {
+                            let value = try_convert(WatchEvent::Added(Foo {
+                                metadata: ObjectMeta {
+                                    namespace: Some("default".to_string()),
+                                    name: Some("myfoo".to_string()),
+                                    ..Default::default()
+                                },
+                                foo: "bar".to_string(),
                                 ..Default::default()
-                            },
-                            foo: "bar".to_string(),
-                            ..Default::default()
-                        })),
-                        try_convert(WatchEvent::Modified(Foo {
-                            metadata: ObjectMeta {
-                                namespace: Some("default".to_string()),
-                                name: Some("myfoo".to_string()),
+                            }))?;
+                            yield value;
+                            let value = try_convert(WatchEvent::Modified(Foo {
+                                metadata: ObjectMeta {
+                                    namespace: Some("default".to_string()),
+                                    name: Some("myfoo".to_string()),
+                                    ..Default::default()
+                                },
+                                foo: "baz".to_string(),
                                 ..Default::default()
-                            },
-                            foo: "baz".to_string(),
-                            ..Default::default()
-                        })),
-                    ],
-                    _ => vec![Err(failure::err_msg("Unknown resource"))],
-                },
-                _ => vec![Err(failure::err_msg("Bad method"))],
+                            }))?;
+                            yield value;
+                        },
+                        _ => Err(failure::err_msg("Unknown resource"))?,
+                    },
+                    _ => Err(failure::err_msg("Bad method"))?,
+                };
             };
-            Box::new(stream::iter_result(results))
+            Box::pin(s)
         }
     }
 
@@ -559,8 +499,8 @@ mod test {
             namespace: "default".to_string(),
             name: "myfoo".to_string(),
         };
-        let f = c.resource(Foos).get(&name, Default::default());
-        let result = f.wait();
+        let f = async { c.resource(Foos).get(&name, Default::default()).await };
+        let result = futures::executor::block_on(f);
         assert!(result.is_ok());
     }
 
@@ -578,14 +518,18 @@ mod test {
             plural: "foos".to_string(),
         };
 
-        let f = c.resource(&rsrc).get(
-            &DynamicScope::Namespace(NamespaceScope::Name {
-                namespace: "default".to_string(),
-                name: "myfoo".to_string(),
-            }),
-            Default::default(),
-        );
-        let result = f.wait();
+        let f = async {
+            c.resource(&rsrc)
+                .get(
+                    &DynamicScope::Namespace(NamespaceScope::Name {
+                        namespace: "default".to_string(),
+                        name: "myfoo".to_string(),
+                    }),
+                    Default::default(),
+                )
+                .await
+        };
+        let result = futures::executor::block_on(f);
         assert!(result.is_ok());
     }
 }

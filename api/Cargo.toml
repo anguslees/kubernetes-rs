@@ -14,8 +14,9 @@ edition = "2018"
 maintenance = {status = "actively-developed,experimental"}
 
 [dependencies]
+async-trait = "0.1"
 failure = "0.1.1"
-futures = "0.1"
+futures-preview = "0.3.0-alpha.19"
 http = "0.1"
 kubernetes_apimachinery = {path = "../apimachinery"}
 log = "0.4"

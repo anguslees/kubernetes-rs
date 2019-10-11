@@ -77,7 +77,7 @@ impl<B> Response<B> {
 
 impl<B> Response<B>
 where
-    B: DeserializeOwned + Send + 'static,
+    B: DeserializeOwned + Send,
 {
     // Should be TryFrom, once that stabilises.
     pub fn from_http_response<A: AsRef<[u8]>>(resp: http::Response<A>) -> Result<Self, Error> {

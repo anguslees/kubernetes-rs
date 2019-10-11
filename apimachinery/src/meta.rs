@@ -1,7 +1,8 @@
 use crate::meta::v1::{DeleteOptions, GetOptions, ListOptions, UpdateOptions, WatchEvent};
 use crate::request::Patch;
+use async_trait::async_trait;
 use failure::{Error, Fail};
-use futures::{Future, Stream};
+use futures::stream::BoxStream;
 use serde::de::{self, DeserializeOwned, Deserializer, Unexpected};
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
@@ -592,43 +593,45 @@ pub trait Resource {
     }
 }
 
+#[async_trait]
 pub trait ResourceService {
     type Resource: Resource;
+
     // Note to self: match RBAC verbs, not API docs ("get", not "read"; "update" not "replace")
-    fn get(
+    async fn get(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: GetOptions,
-    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
-    fn list(
+    ) -> Result<<Self::Resource as Resource>::Item, Error>;
+    async fn list(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: ListOptions,
-    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::List, Error = Error> + Send>;
+    ) -> Result<<Self::Resource as Resource>::List, Error>;
     fn watch(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: ListOptions,
-    ) -> Box<dyn Stream<Item = WatchEvent<<Self::Resource as Resource>::Item>, Error = Error> + Send>;
-    fn create(
+    ) -> BoxStream<Result<WatchEvent<<Self::Resource as Resource>::Item>, Error>>;
+    async fn create(
         &self,
         value: <Self::Resource as Resource>::Item,
         opts: GetOptions,
-    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
-    fn patch(
+    ) -> Result<<Self::Resource as Resource>::Item, Error>;
+    async fn patch(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         patch: Patch,
         opts: UpdateOptions,
-    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
-    fn update(
+    ) -> Result<<Self::Resource as Resource>::Item, Error>;
+    async fn update(
         &self,
         value: <Self::Resource as Resource>::Item,
         opts: UpdateOptions,
-    ) -> Box<dyn Future<Item = <Self::Resource as Resource>::Item, Error = Error> + Send>;
-    fn delete(
+    ) -> Result<<Self::Resource as Resource>::Item, Error>;
+    async fn delete(
         &self,
         name: &<Self::Resource as Resource>::Scope,
         opts: DeleteOptions,
-    ) -> Box<dyn Future<Item = (), Error = Error> + Send>;
+    ) -> Result<(), Error>;
 }

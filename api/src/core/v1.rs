@@ -1,6 +1,7 @@
 use crate::policy::v1beta1::Eviction;
+use async_trait::async_trait;
 use failure::Error;
-use futures::{future, Future, Stream};
+use futures::io::{AsyncRead, AsyncWrite};
 use http::Method;
 use kubernetes_apimachinery::client::{ApiClient, ResourceClient};
 use kubernetes_apimachinery::meta::v1::{
@@ -8,10 +9,9 @@ use kubernetes_apimachinery::meta::v1::{
 };
 use kubernetes_apimachinery::meta::{
     GroupVersion, GroupVersionResource, IntOrString, Integer, NamespaceScope, Quantity, Resource,
-    ResourceScope, Time, TypeMetaImpl,
+    Time, TypeMetaImpl,
 };
 use kubernetes_apimachinery::request::{Request, APPLICATION_JSON};
-use kubernetes_apimachinery::response::Response;
 use kubernetes_apimachinery::{ApiService, HttpService, HttpUpgradeService};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Map, Value};
@@ -119,72 +119,75 @@ pub struct PodProxyOptions {
     pub path: String,
 }
 
-// TODO: The stream errors should probably be some other error type.
-// Also: StreamItem should probably be a Buf, or replace the whole
-// thing with AsyncRead/Write.
-pub type ByteStream = Box<dyn Stream<Item = Vec<u8>, Error = Error> + Send>;
-
 /// Trait adding extra methods to the regular Pods ResourceService.
 /// These are unusually exciting and may not be implemented for your
 /// particular client/server.
+#[async_trait]
 pub trait PodsServiceExt {
-    fn read_log(
+    type Read: AsyncRead;
+
+    async fn read_log(
         &self,
         name: &<Pods as Resource>::Scope,
         opts: PodLogOptions,
-    ) -> Box<dyn Future<Item = ByteStream, Error = Error> + Send>;
+    ) -> Result<Self::Read, Error>;
 
-    fn connect_portforward(
+    async fn connect_portforward(
         &self,
         name: &<Pods as Resource>::Scope,
         opts: PodPortForwardOptions,
-    ) -> Box<dyn Future<Item = (), Error = Error> + Send>;
+    ) -> Result<(), Error>;
 
-    fn proxy<I, O>(
+    async fn proxy<I, O>(
         &self,
         name: &<Pods as Resource>::Scope,
         req: http::Request<I>,
         opts: PodProxyOptions,
-    ) -> Box<dyn Future<Item = http::Response<O>, Error = Error> + Send>;
+    ) -> Result<http::Response<O>, Error>
+    where
+        I: Send;
 
-    fn attach(
+    async fn attach<Stdin>(
         &self,
         name: &<Pods as Resource>::Scope,
-        stdin: Option<ByteStream>,
+        stdin: Option<Stdin>,
         opts: PodAttachOptions,
-    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
+    ) -> Result<(Self::Read, Self::Read), Error>
+    where
+        Stdin: AsyncWrite + Send;
 
     // TODO: Needs to also return Future<exit status>, and sigwinch.
-    fn exec(
+    // (basically the return should look more like std::process::Child)
+    async fn exec<Stdin>(
         &self,
         name: &<Pods as Resource>::Scope,
-        stdin: Option<ByteStream>,
+        stdin: Option<Stdin>,
         opts: PodExecOptions,
-    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send>;
+    ) -> Result<(Self::Read, Self::Read), Error>
+    where
+        Stdin: AsyncWrite + Send;
 
-    fn create_eviction(
+    async fn create_eviction(
         &self,
         name: &<Pods as Resource>::Scope,
         value: Eviction,
         opts: CreateOptions,
-    ) -> Box<dyn Future<Item = Eviction, Error = Error> + Send>;
+    ) -> Result<Eviction, Error>;
 }
 
+#[async_trait]
 impl<C> PodsServiceExt for ResourceClient<ApiClient<C>, Pods>
 where
     C: HttpService + HttpUpgradeService + Send + Sync,
-    <C as HttpService>::Future: 'static,
-    <C as HttpService>::Stream: 'static,
-    <C as HttpService>::StreamFuture: 'static,
-    <C as HttpUpgradeService>::Stream: 'static,
-    <C as HttpUpgradeService>::Future: 'static,
     ApiClient<C>: Clone,
 {
-    fn read_log(
+    type Read = <C as HttpUpgradeService>::Upgraded;
+
+    async fn read_log(
         &self,
         name: &<Pods as Resource>::Scope,
         opts: PodLogOptions,
-    ) -> Box<dyn Future<Item = ByteStream, Error = Error> + Send> {
+    ) -> Result<Self::Read, Error> {
         let req = Request::builder(Pods::gvr())
             .scope(name)
             .subresource("logs")
@@ -192,64 +195,67 @@ where
             .opts(opts)
             .build();
 
-        let r = match req.into_http_request(self.api_client().base_url()) {
-            Ok(r) => r.map(|_| ()),
-            Err(e) => return Box::new(future::err(e)),
-        };
+        let r = req.into_http_request(self.api_client().base_url())?;
 
-        let result = self
+        let upgraded = self
             .api_client()
             .http_client()
-            .upgrade(r)
-            .map(|(stream, _sink)| {
-                Box::new(stream.map(|buf| Vec::from(buf.as_ref()))) as ByteStream
-            });
-
-        Box::new(result)
+            .upgrade(r.map(|_| ()))
+            .await?;
+        Ok(upgraded)
     }
 
-    fn connect_portforward(
+    async fn connect_portforward(
         &self,
         _name: &<Pods as Resource>::Scope,
         _opts: PodPortForwardOptions,
-    ) -> Box<dyn Future<Item = (), Error = Error> + Send> {
+    ) -> Result<(), Error> {
         unimplemented!();
     }
 
-    fn proxy<I, O>(
+    async fn proxy<I, O>(
         &self,
         _name: &<Pods as Resource>::Scope,
         _req: http::Request<I>,
         _opts: PodProxyOptions,
-    ) -> Box<dyn Future<Item = http::Response<O>, Error = Error> + Send> {
+    ) -> Result<http::Response<O>, Error>
+    where
+        I: Send,
+    {
         unimplemented!();
     }
 
-    fn attach(
+    async fn attach<Stdin>(
         &self,
         _name: &<Pods as Resource>::Scope,
-        _stdin: Option<ByteStream>,
+        _stdin: Option<Stdin>,
         _opts: PodAttachOptions,
-    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
+    ) -> Result<(Self::Read, Self::Read), Error>
+    where
+        Stdin: AsyncWrite + Send,
+    {
         unimplemented!();
     }
 
     // TODO: Needs to also return Future<exit status>, and sigwinch.
-    fn exec(
+    async fn exec<Stdin>(
         &self,
         _name: &<Pods as Resource>::Scope,
-        _stdin: Option<ByteStream>,
+        _stdin: Option<Stdin>,
         _opts: PodExecOptions,
-    ) -> Box<dyn Future<Item = (ByteStream, ByteStream), Error = Error> + Send> {
+    ) -> Result<(Self::Read, Self::Read), Error>
+    where
+        Stdin: AsyncWrite + Send,
+    {
         unimplemented!();
     }
 
-    fn create_eviction(
+    async fn create_eviction(
         &self,
         name: &<Pods as Resource>::Scope,
         value: Eviction,
         opts: CreateOptions,
-    ) -> Box<dyn Future<Item = Eviction, Error = Error> + Send> {
+    ) -> Result<Eviction, Error> {
         let req = Request::builder(Pods::gvr())
             .scope(name)
             .subresource("eviction")
@@ -258,12 +264,8 @@ where
             .body(APPLICATION_JSON, value)
             .build();
 
-        let result = self
-            .api_client()
-            .request(req)
-            .map(|resp: Response<_>| resp.into_body());
-
-        Box::new(result)
+        let resp = self.api_client().request(req).await?;
+        Ok(resp.into_body())
     }
 }
 

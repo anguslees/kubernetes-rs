@@ -1,144 +1,137 @@
 #![warn(unused_extern_crates)]
+// async_stream needs all the recursions
+#![recursion_limit = "1000"]
 
 use crate::request::Request;
 use crate::response::Response;
+use async_trait::async_trait;
 use failure::Error;
-use futures::{Future, Sink, Stream};
+use futures::io::{AsyncRead, AsyncWrite};
+use futures::stream::BoxStream;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
+use std::ops::Deref;
 use std::sync::Arc;
 
 pub mod client;
 pub mod meta;
 pub mod request;
-mod resplit;
 pub mod response;
 pub mod serde_base64;
 pub mod unstructured;
 
+#[async_trait]
 pub trait ApiService {
     // TODO: add other methods like version, schema introspection, etc.
 
-    fn request<B, O, B2>(
-        &self,
-        req: Request<B, O>,
-    ) -> Box<dyn Future<Item = Response<B2>, Error = Error> + Send>
+    async fn request<B, O, B2>(&self, req: Request<B, O>) -> Result<Response<B2>, Error>
     where
-        B: Serialize + Send + 'static,
-        O: Serialize + Send + 'static,
+        B: Serialize + Send + 'async_trait,
+        O: Serialize + Send + 'async_trait,
         B2: DeserializeOwned + Send + 'static;
 
-    fn watch<B, O, B2>(
-        &self,
-        req: Request<B, O>,
-    ) -> Box<dyn Stream<Item = B2, Error = Error> + Send>
+    fn watch<'a, B, O, B2>(&'a self, req: Request<B, O>) -> BoxStream<'a, Result<B2, Error>>
     where
-        B: Serialize + Send + 'static,
-        O: Serialize + Send + 'static,
-        B2: DeserializeOwned + Send + 'static;
+        B: Serialize + Send + 'a,
+        O: Serialize + Send + 'a,
+        B2: DeserializeOwned + Send + Unpin + 'static;
 }
 
+#[async_trait]
 pub trait HttpService {
     type Body: AsRef<[u8]> + IntoIterator<Item = u8>;
-    type Future: Future<Item = http::Response<Self::Body>, Error = Error> + Send;
-    type StreamFuture: Future<Item = http::Response<Self::Stream>, Error = Error> + Send;
-    type Stream: Stream<Item = Self::Body, Error = Error> + Send;
+    type Read: AsyncRead + Send;
 
-    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future;
+    async fn request(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Body>, Error>;
 
-    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture;
+    // FIXME: this can probably be unified with request(), given the
+    // right type constraints
+    async fn watch(&self, req: http::Request<Vec<u8>>)
+        -> Result<http::Response<Self::Read>, Error>;
 }
 
-impl<T: ?Sized + HttpService> HttpService for Box<T> {
+#[async_trait]
+impl<T: ?Sized + HttpService + Send + Sync> HttpService for Box<T> {
     type Body = T::Body;
-    type Future = T::Future;
-    type StreamFuture = T::StreamFuture;
-    type Stream = T::Stream;
+    type Read = T::Read;
 
-    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
-        (**self).request(req)
+    async fn request(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Body>, Error> {
+        (**self).request(req).await
     }
 
-    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture {
-        (**self).watch(req)
+    async fn watch(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Read>, Error> {
+        (**self).watch(req).await
     }
 }
 
-impl<T: ?Sized + HttpService> HttpService for Arc<T> {
+#[async_trait]
+impl<T: ?Sized + HttpService + Send + Sync> HttpService for Arc<T> {
     type Body = T::Body;
-    type Future = T::Future;
-    type StreamFuture = T::StreamFuture;
-    type Stream = T::Stream;
+    type Read = T::Read;
 
-    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
-        (**self).request(req)
+    async fn request(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Body>, Error> {
+        (**self).request(req).await
     }
 
-    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture {
-        (**self).watch(req)
+    async fn watch(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Read>, Error> {
+        (**self).watch(req).await
     }
 }
 
-impl<'a, T: ?Sized + HttpService> HttpService for &'a T {
+#[async_trait]
+impl<'a, T: ?Sized + HttpService + Send + Sync> HttpService for &'a T {
     type Body = T::Body;
-    type Future = T::Future;
-    type StreamFuture = T::StreamFuture;
-    type Stream = T::Stream;
+    type Read = T::Read;
 
-    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
-        (**self).request(req)
+    async fn request(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Body>, Error> {
+        (**self).request(req).await
     }
 
-    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture {
-        (**self).watch(req)
+    async fn watch(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Read>, Error> {
+        (**self).watch(req).await
     }
 }
 
+#[async_trait]
 pub trait HttpUpgradeService {
-    // Ideally this trait would use AsyncRead+AsyncWrite, but that requires
-    // a dependency on tokio_io (just for those trait declarations).
-    // Take the easy/slow path for now and use Stream+Sink instead.
-    type Sink: Sink<SinkItem = Self::SinkItem, SinkError = Error> + Send;
-    type SinkItem: AsRef<[u8]>;
-    type Stream: Stream<Item = Self::StreamItem, Error = Error> + Send;
-    type StreamItem: AsRef<[u8]>;
-    type Future: Future<Item = (Self::Stream, Self::Sink), Error = Error> + Send;
+    type Upgraded: AsyncRead + AsyncWrite;
 
-    fn upgrade(&self, req: http::Request<()>) -> Self::Future;
+    async fn upgrade(&self, req: http::Request<()>) -> Result<Self::Upgraded, Error>;
 }
 
-impl<T: HttpUpgradeService> HttpUpgradeService for Arc<T> {
-    type Sink = T::Sink;
-    type SinkItem = T::SinkItem;
-    type Stream = T::Stream;
-    type StreamItem = T::StreamItem;
-    type Future = T::Future;
+#[async_trait]
+impl<T> HttpUpgradeService for T
+where
+    T: Deref + Sync,
+    T::Target: HttpUpgradeService + Send + Sync,
+{
+    type Upgraded = <T::Target as HttpUpgradeService>::Upgraded;
 
-    fn upgrade(&self, req: http::Request<()>) -> Self::Future {
-        (**self).upgrade(req)
-    }
-}
-
-impl<T: HttpUpgradeService> HttpUpgradeService for Box<T> {
-    type Sink = T::Sink;
-    type SinkItem = T::SinkItem;
-    type Stream = T::Stream;
-    type StreamItem = T::StreamItem;
-    type Future = T::Future;
-
-    fn upgrade(&self, req: http::Request<()>) -> Self::Future {
-        (**self).upgrade(req)
-    }
-}
-
-impl<'a, T: HttpUpgradeService> HttpUpgradeService for &'a T {
-    type Sink = T::Sink;
-    type SinkItem = T::SinkItem;
-    type Stream = T::Stream;
-    type StreamItem = T::StreamItem;
-    type Future = T::Future;
-
-    fn upgrade(&self, req: http::Request<()>) -> Self::Future {
-        (**self).upgrade(req)
+    async fn upgrade(
+        &self,
+        req: http::Request<()>,
+    ) -> Result<<Self as HttpUpgradeService>::Upgraded, Error> {
+        self.deref().upgrade(req).await
     }
 }

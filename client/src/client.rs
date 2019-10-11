@@ -1,7 +1,9 @@
 use crate::config::{self, ConfigContext, CONFIG_ENV};
-use bytes::{Bytes, BytesMut};
+use async_trait::async_trait;
 use failure::{format_err, Error, ResultExt};
-use futures::{future, Future, Sink, Stream};
+use futures::compat::{Compat01As03, Future01CompatExt, Stream01CompatExt};
+use futures::io::AsyncRead;
+use futures::stream::TryStreamExt;
 use http;
 use hyper;
 use hyper_tls::HttpsConnector;
@@ -12,9 +14,10 @@ use log::debug;
 use native_tls::{Certificate, Identity, TlsConnector};
 use openssl;
 use std::env;
+use std::io;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio_codec::{BytesCodec, Framed};
 
 /// An implementation of apimachinery::HttpClient using hyper.
 #[derive(Debug, Clone)]
@@ -99,99 +102,84 @@ impl<C> Client<C> {
 
 impl<C> Client<C>
 where
+    // NB: hyper's ResponseFuture.inner is 'static, which requires this 'static
     C: hyper::client::connect::Connect + 'static,
 {
-    fn http_request(
+    async fn http_request(
         &self,
         req: http::Request<hyper::Body>,
-    ) -> impl Future<Item = http::Response<hyper::Body>, Error = Error> {
+    ) -> Result<http::Response<hyper::Body>, Error> {
         // Avoid printing body, since it may not be Debug
         debug!("Request: {} {}", req.method(), req.uri());
-        self.client
-            .request(req)
-            .inspect(|res| {
-                // NB: http::header will omit headers marked "sensitive"
-                debug!("Response: {} {:?}", res.status(), res.headers());
-                // Verbose!
-                //debug!("Response: {:#?}", res);
-            })
-            .from_err::<Error>()
-            .and_then(|res: http::Response<_>| {
-                let httpstatus = res.status();
-                let r = if httpstatus.is_success() {
-                    Ok(res)
-                } else {
-                    Err(res)
-                };
-                future::result(r).or_else(move |res| {
-                    res.into_body()
-                        .concat2()
-                        .from_err::<Error>()
-                        .and_then(move |body| {
-                            let status = Status::from_vec(body.to_vec())?;
-                            Err(status.into())
-                        })
-                })
-            })
+        let res = self.client.request(req).compat().await?;
+
+        // NB: http::header will omit headers marked "sensitive"
+        debug!("Response: {} {:?}", res.status(), res.headers());
+        // Verbose!
+        //debug!("Response: {:#?}", res);
+
+        let httpstatus = res.status();
+        if httpstatus.is_success() {
+            Ok(res)
+        } else {
+            // HTTP non-2xx response
+            let body = res.into_body().compat().try_concat().await?;
+            let status = Status::from_vec(body.to_vec())?;
+            Err(status.into())
+        }
     }
 }
 
+#[async_trait]
 impl<C> HttpService for Client<C>
 where
     C: hyper::client::connect::Connect + 'static,
 {
     type Body = hyper::Chunk;
-    type Future = Box<dyn Future<Item = http::Response<Self::Body>, Error = Error> + Send>;
-    type Stream = Box<dyn Stream<Item = Self::Body, Error = Error> + Send>;
-    type StreamFuture = Box<dyn Future<Item = http::Response<Self::Stream>, Error = Error> + Send>;
+    type Read = Pin<Box<dyn AsyncRead + Send>>;
 
-    fn request(&self, req: http::Request<Vec<u8>>) -> Self::Future {
+    async fn request(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Body>, Error> {
         let hreq = req.map(|b| b.into());
-        let f = self
-            .http_request(hreq)
-            .and_then(|resp: http::Response<hyper::Body>| {
-                // Read body content into memory
-                let (parts, body) = resp.into_parts();
-                body.concat2()
-                    .from_err()
-                    .map(move |b| http::Response::from_parts(parts, b.into()))
-            });
-        Box::new(f)
+        let resp = self.http_request(hreq).await?;
+
+        // Read body content into memory
+        let (parts, body) = resp.into_parts();
+        let body = body.compat().try_concat().await?;
+        let resp = http::Response::from_parts(parts, body.into());
+        Ok(resp)
     }
 
-    fn watch(&self, req: http::Request<Vec<u8>>) -> Self::StreamFuture {
+    async fn watch(
+        &self,
+        req: http::Request<Vec<u8>>,
+    ) -> Result<http::Response<Self::Read>, Error> {
         let hreq = req.map(|b| b.into());
-        let f = self
-            .http_request(hreq)
-            .from_err()
-            .map(|resp: http::Response<hyper::Body>| {
-                resp.map(|body| Box::new(body.from_err()) as Self::Stream)
-            });
-        Box::new(f)
+        let resp = self.http_request(hreq).await?;
+
+        let (parts, body) = resp.into_parts();
+        let bodyreader = Compat01As03::new(body)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            .into_async_read();
+        let resp = http::Response::from_parts(parts, Box::pin(bodyreader) as Self::Read);
+        Ok(resp)
     }
 }
 
+#[async_trait]
 impl<C> HttpUpgradeService for Client<C>
 where
     C: hyper::client::connect::Connect + 'static,
 {
-    type Sink = Box<dyn Sink<SinkItem = Self::SinkItem, SinkError = Error> + Send>;
-    type SinkItem = Bytes;
-    type Stream = Box<dyn Stream<Item = Self::StreamItem, Error = Error> + Send>;
-    type StreamItem = BytesMut;
-    type Future = Box<dyn Future<Item = (Self::Stream, Self::Sink), Error = Error> + Send>;
+    type Upgraded = Compat01As03<hyper::upgrade::Upgraded>;
 
-    fn upgrade(&self, req: http::Request<()>) -> Self::Future {
-        let f = self
+    async fn upgrade(&self, req: http::Request<()>) -> Result<Self::Upgraded, Error> {
+        let res = self
             .http_request(req.map(|()| hyper::Body::empty()))
-            .and_then(|res| res.into_body().on_upgrade().from_err())
-            .map(|upgraded| {
-                let (sink, stream) = Framed::new(upgraded, BytesCodec::new()).split();
-                (
-                    Box::new(stream.from_err()) as Self::Stream,
-                    Box::new(sink.sink_from_err()) as Self::Sink,
-                )
-            });
-        Box::new(f)
+            .await?;
+        let upgraded = res.into_body().on_upgrade().compat().await?;
+        Ok(Compat01As03::new(upgraded))
     }
 }

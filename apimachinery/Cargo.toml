@@ -18,9 +18,11 @@ default = ["derive"]
 derive = ["kubernetes_apimachinery_derive"]
 
 [dependencies]
+async-stream = "0.1"
+async-trait = "0.1"
 base64 = "0.9"
 failure = "0.1.1"
-futures = "0.1"
+futures-preview = "0.3.0-alpha.19"
 http = "0.1"
 kubernetes_apimachinery_derive = { optional = true, path = "../apimachinery_derive" }
 log = "0.4"
