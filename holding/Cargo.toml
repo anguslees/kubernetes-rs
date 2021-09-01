@@ -14,7 +14,7 @@ maintenance = {status = "actively-developed,experimental"}
 
 [dependencies]
 dirs = "1.0"
-url = "1.6"
+url = "1.7"
 hyper = "0.12"
 hyper-tls = "0.3"
 native-tls = "0.2"
