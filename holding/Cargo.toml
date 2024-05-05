@@ -27,7 +27,7 @@ futures = "0.1.21"
 tokio = "0.1.7"
 tokio-core = "0.1.18"
 failure = "0.1.8"
-base64 = "0.9"
+base64 = "0.22"
 log = "0.4"
 openssl = "0.10"
 kubernetes_api = { path = "../api" }
