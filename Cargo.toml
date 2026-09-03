@@ -29,7 +29,7 @@ kubernetes_proxy = { path = "proxy" }
 
 [dev-dependencies]
 failure = "0.1"
-futures = "0.1.21"
+futures = "0.3.0"
 hyper = "0.12"
 hyper-tls = "0.3"
 log = "0.4"
